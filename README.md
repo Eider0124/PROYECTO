@@ -1,4 +1,5 @@
-Pipeline de Preprocesamiento para Patología Digital 🔬
+Pipeline de Preprocesamiento para Patología Digital
+
 Descripción General
 Este proyecto contiene un conjunto de scripts diseñados para automatizar el preprocesamiento de Imágenes de Láminas Enteras (WSI - Whole Slide Images) en formato TIFF de altísima resolución. El objetivo principal es limpiar, recortar y extraer únicamente el tejido útil de las muestras médicas, eliminando el fondo de cristal y los artefactos, para preparar los datos antes de entrenar modelos de Deep Learning.
 
