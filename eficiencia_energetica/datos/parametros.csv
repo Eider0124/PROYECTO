@@ -1,0 +1,10 @@
+parametro,valor,unidad,nota
+conversion_aire,0.15,kWh/m3,"Promedio de 0,12-0,18 kWh por m3 de aire comprimido (pág. 67)"
+participacion_aire,0.2382,fraccion,"Aire comprimido = 23,82% del consumo de las líneas medidas (pág. 67)"
+ice_muy_eficiente_max,6,kWh/t,ICE 3-6 = muy eficiente (pág. 68)
+ice_intermedio_max,12,kWh/t,ICE 6-12 = intermedio
+ice_baja_max,20,kWh/t,ICE 12-20 = baja eficiencia; >20 ineficiente
+planta_semana_ixon,21700,kWh/semana,"Promedio 4 semanas, subestación Ixon (pág. 58)"
+planta_semana_emcali,22600,kWh/semana,"Promedio 4 semanas, EMCALI (pág. 58)"
+lineas_medidas_participacion,"0,60-0,65",fraccion,Medidores + aire = 60-65% del consumo de las líneas (pág. 60)
+chiller_aa_mezclas_participacion,"0,35-0,40",fraccion,"Chillers, A.A. y mezclas no medidos (pág. 60)"

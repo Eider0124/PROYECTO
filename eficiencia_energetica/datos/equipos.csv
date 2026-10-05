@@ -1,0 +1,9 @@
+linea,equipo,cantidad,energetico,nota
+L22,Bandas transportadoras,7,electrico,Motores eléctricos
+L22,Mesa giratoria,1,ambos,Motor + neumática
+L22,Dosificadora volumétrica,,ambos,"Motores, variadores y actuadores"
+L22,Selladora térmica,1,electrico,Resistencias
+L22,Selladora de cajas,1,ambos,
+L22,Etiquetado wrap-around,1,ambos,Compartido con otras líneas
+L22,Cilindros neumáticos,,aire,
+L22,Válvulas solenoides,,electrico,
