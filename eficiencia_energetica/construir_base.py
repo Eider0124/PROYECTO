@@ -102,6 +102,15 @@ def main():
         add(f, "PLANTA", "energia_activa_emcali", "kWh/dia", v, "leido", p,
             "Domingo, día no productivo." if f == "2026-02-01" else "")
     datos = BASE / "datos"; datos.mkdir(exist_ok=True)
+    prod = datos / "produccion_l22_diaria.csv"
+    if prod.exists():  # generado por importar_produccion.py
+        fuente_prod = "Excel KG producidos 2024-2026, hoja Data PA 2026"
+        with open(prod, encoding="utf-8") as fh:
+            for r in csv.DictReader(fh):
+                nota = "Día con mantenimiento programado." if r["mantenimiento"] == "si" else ""
+                for var, col in [("produccion", "kg_total"), ("produccion_turno1", "kg_turno1"), ("produccion_turno2", "kg_turno2")]:
+                    add(r["fecha"], "L22", var, "kg/dia", float(r[col]), "leido", None, nota)
+                    filas[-1]["fuente"] = fuente_prod
     campos = list(filas[0].keys())
     with open(datos / "mediciones.csv", "w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(fh, fieldnames=campos); w.writeheader(); w.writerows(filas)

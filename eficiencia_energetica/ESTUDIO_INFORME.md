@@ -42,7 +42,7 @@
 | # | Fecha / página | Problema | Cómo quedó en la base |
 | --- | --- | --- | --- |
 | 1 | 7 feb · pág. 41 | 731,7 kWh, 6,5 veces lo normal | `atipico`, excluido |
-| 2 | Feb S4 · págs. 42 y 76 | El informe dice "no hubo producción", pero la línea consumió 107–118 kWh/día de lunes a viernes | Incluido; **verificar con producción** |
+| 2 | Feb S4 · págs. 42 y 76 | El informe dice "no hubo producción", pero la línea consumió 107–118 kWh/día de lunes a viernes | **Resuelto:** el Excel de producción muestra 29,7–31,7 t/día ese lunes a viernes. El error está en el informe |
 | 3 | Ene S4 · págs. 40 y 69 | La sección de ICE dice "no hubo mediciones", pero sí hay consumo | Incluido |
 | 4 | 2–3 abr · pág. 45 | 0 kWh (Jueves y Viernes Santo) | `cero`, excluido de promedios |
 | 5 | 23 abr · pág. 46 | 3,6 kWh, corte de datos | `parcial`, excluido |
@@ -66,19 +66,70 @@ Festivos sin dato (lunes): 23 de marzo y 18 de mayo.
 
 ## 5. Datos que faltan para la línea base
 
-- [ ] Producción diaria de la L22 (toneladas y unidades) para recalcular el ICE en todo el periodo.
+- [x] Producción diaria de la L22 (recibida: Excel KG producidos, ver sección 7).
 - [ ] Consumo de aire comprimido de la L22 en m³/día desde marzo.
-- [ ] Registro de paros y producción de la semana 4 de febrero.
+- [x] Producción de la semana 4 de febrero (sí hubo, ver sección 7).
+- [ ] Registro de paros con duración y causa.
+- [ ] Energía de la L22 del 24 al 29 de abril, del 4 al 8 de mayo y desde el 7 de junio (hay producción pero no energía).
 - [ ] Horario real de turnos de la L22 (A, B, C) y consumo por turno.
 - [ ] Datos de la L22 después del 6 de junio (renovar Ixon o exportar desde el medidor).
 - [ ] Consumo del chiller asignable a la L22.
 - [ ] Tarifa de energía (COP/kWh) para valorar ahorros.
 
-## 6. Archivos de la base
+## 7. Producción 2026 (Excel "KG producidos 2024, 2025 y 2026")
+
+**Fuente:** hoja `Data PA 2026`, un registro por fecha, turno y SKU. La hoja "1. Kg real 2026" es una tabla dinámica de la misma hoja; los totales de la L22 coinciden en los 71 días que muestra.
+
+- **Periodo:** 2 de enero al 4 de agosto de 2026, 161 días con registro (154 con kg > 0), 2 turnos.
+- **Total producido:** 2.333 t. Turno 1: 1.247 t (53,4%); turno 2: 1.086 t.
+- **Productos:** Vanish 450 ml, 300 ml y 130 ml (blanco y rosado) y Saniplex 200 ml.
+- **Mantenimiento programado** (SKU 22): 13–14 ene, 10–11 mar, 25–26 may, 27–28 jul.
+
+| Mes | t producidas |
+| --- | --- |
+| Enero | 362 |
+| Febrero | 378 |
+| Marzo | 318 |
+| Abril | 351 |
+| Mayo | 307 |
+| Junio | 246 |
+| Julio | 335 |
+| Agosto (hasta el 4) | 35 |
+
+### Energía frente a producción (86 días con ambos datos)
+
+| Indicador | Valor |
+| --- | --- |
+| Intensidad eléctrica del periodo | **6,36 kWh/t** (solo electricidad del medidor) |
+| Mediana diaria | 7,8 kWh/t (rango 3,4–26,1) |
+| Modelo de consumo diario | kWh = **74,1 + 1,38 × t** (R² = 0,29) |
+| Producción promedio | 14,9 t/día |
+
+Por mes, con los días que tienen ambos datos: enero 4,3 · febrero 6,0 · marzo 6,5 · abril 7,1 · mayo 7,7 · junio 5,6 kWh/t. La intensidad sube cuando baja la producción.
+
+### Hallazgos
+
+1. **El consumo casi no depende de lo que se produce.** Unos 74 kWh/día son fijos y cada tonelada solo agrega 1,4 kWh. En un día promedio, cerca del 78% del consumo es fijo (74 de 95 kWh). Es la principal oportunidad del esquema.
+2. **Mantenimiento con consumo de día productivo.** El 10 y 11 de marzo hubo mantenimiento sin producción y la línea consumió 84 kWh/día, casi lo mismo que produciendo.
+3. **Consumo base sin producción.** Los sábados y días sin producción la línea consume entre 25 y 37 kWh (31 ene, 28 feb, 24 mar, 30 may).
+4. **El ICE del informe incluye mucho aire.** El ICE del informe es en promedio 1,5 veces el kWh/t eléctrico. Si el informe usó estos mismos kg, el aire comprimido sería cerca del 36% de la energía de la L22 (≈ 51 kWh/día, ≈ 340 m³/día). Es más que el 23,82% general del informe; **hay que confirmarlo con la medición de aire.**
+5. **Confirmado el error del 7 de febrero.** Ese sábado se produjeron 11,6 t, un día normal; los 731,7 kWh son error del medidor.
+6. **Producción sin energía medida:** 30 mar, 24–29 abr y 4–8 may (11 días, ≈ 258 t), además de todo lo posterior al 6 de junio.
+
+### Calidad del Excel de producción
+
+- Los SKU 3331339 y 3331340 (Saniplex 200 ml) tienen embalaje 6 y 12,851 kg/caja. Seis unidades de 200 ml pesan cerca de 1,3 kg, así que el embalaje o el peso por caja está mal. Los kg pueden estar bien si el peso por caja es el correcto (otros 200 ml x64 pesan 14,158 kg/caja). Afecta 24 registros.
+- Las filas de mantenimiento tienen `#N/A` en embalaje y kg/caja (sin efecto: 0 kg).
+- 18 registros de la L22 tienen 0 kg (mantenimiento o arranques sin cajas).
+
+## 8. Archivos de la base
 
 | Archivo | Contenido |
 | --- | --- |
-| `datos/mediciones.csv` | Tabla larga: fecha, entidad, variable, valor, calidad, incluir, página. 178 filas |
+| `datos/mediciones.csv` | Tabla larga: fecha, entidad, variable, valor, calidad, incluir, página. 661 filas (energía, ICE, producción y planta) |
+| `datos/produccion_l22_detalle.csv` | Producción de la L22 por fecha, turno y SKU (327 registros) |
+| `datos/produccion_l22_diaria.csv` | kg por día y turno (161 días) |
+| `importar_produccion.py` | Extrae la producción de la L22 del Excel de kg producidos |
 | `datos/parametros.csv` | Factores y escalas del informe |
 | `datos/equipos.csv` | Equipos de la L22 |
 | `datos/turnos.csv` | Turno de mayor consumo (L22 y planta) |
