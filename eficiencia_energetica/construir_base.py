@@ -130,6 +130,7 @@ def main():
         w = csv.writer(fh); w.writerow(["parametro", "valor", "unidad", "nota"]); w.writerows(parametros)
 
     equipos = [
+        ("L22", "Envasadora de doypack Mespack", 1, "ambos", "Marca confirmada por el usuario"),
         ("L22", "Bandas transportadoras", 7, "electrico", "Motores eléctricos"),
         ("L22", "Mesa giratoria", 1, "ambos", "Motor + neumática"),
         ("L22", "Dosificadora volumétrica", None, "ambos", "Motores, variadores y actuadores"),
