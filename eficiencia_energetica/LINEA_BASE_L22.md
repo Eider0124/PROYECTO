@@ -34,7 +34,18 @@ Un día de un turno consume el 74% de un día de dos turnos, pero produce la mit
 
 Los días de alta producción son 3 veces más eficientes que los de baja.
 
-## 3. Oportunidades preliminares
+## 3. Comparación con la potencia instalada
+
+La envasadora es una **Mespack H-280 FED** (serie 283.021, 2020): 3 fases, 220 V, 60 Hz, **53 kW instalados**, 155 A a plena carga. El armario es un Rittal VX con equipo de refrigeración SK 3241.124.
+
+| Situación | kWh/día | Potencia media | % de 53 kW |
+| --- | --- | --- | --- |
+| Día de 2 turnos (16 h) | 102 | ≈ 6,4 kW | 12% |
+| Día sin producción (24 h) | 31 | ≈ 1,3 kW | 2,4% |
+
+La máquina trabaja en promedio al 12% de su potencia instalada, algo normal en envasadoras donde los motores y las resistencias no funcionan todos a la vez ni a plena carga. Los 1,3 kW que se mantienen sin producción coinciden con lo que consumen el control (PLC, pantalla, fuentes de 24 V), la refrigeración del armario y las resistencias en mantenimiento de temperatura. **Falta confirmarlo con la lista de cargas del esquema eléctrico.**
+
+## 4. Oportunidades preliminares
 
 Estimación anual con 260 días productivos al año (152 de enero a julio). Los supuestos de cada fila se deben validar en planta.
 
@@ -48,7 +59,7 @@ Estimación anual con 260 días productivos al año (152 de enero a julio). Los 
 
 Sobre un consumo anual estimado de unos 28.500 kWh, la meta inicial sería **reducir cerca del 15–19%** y bajar el indicador de 6,4 a unos **5,2 kWh/t**.
 
-## 4. Qué falta para cerrar la línea base
+## 5. Qué falta para cerrar la línea base
 
 - [ ] **Consumo de los domingos:** el informe no tiene datos de domingo de la L22. Si la línea queda energizada, O3 crece.
 - [ ] **Registro de paros con hora y duración:** para saber cuánto de los 74 kWh fijos ocurre con la línea parada.

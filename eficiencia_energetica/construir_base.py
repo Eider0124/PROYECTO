@@ -130,7 +130,8 @@ def main():
         w = csv.writer(fh); w.writerow(["parametro", "valor", "unidad", "nota"]); w.writerows(parametros)
 
     equipos = [
-        ("L22", "Envasadora de doypack Mespack", 1, "ambos", "Marca confirmada por el usuario"),
+        ("L22", "Envasadora de doypack Mespack H-280 FED", 1, "ambos", "Serie 283.021, 2020. 3F 220 V 60 Hz, 53 kW instalados, corriente a plena carga 155 A, carga mayor 26,2 A, SCCR 10 kA. Control 110 V CA y 24 V CC (portada del esquema eléctrico)"),
+        ("L22", "Armario eléctrico Rittal VX con refrigeración SK 3241.124", 1, "electrico", "2000 x 3000 x 500 mm, IP55, 5 puertas. El equipo de refrigeración del armario puede quedar encendido siempre"),
         ("L22", "Bandas transportadoras", 7, "electrico", "Motores eléctricos"),
         ("L22", "Mesa giratoria", 1, "ambos", "Motor + neumática"),
         ("L22", "Dosificadora volumétrica", None, "ambos", "Motores, variadores y actuadores"),
