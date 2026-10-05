@@ -126,10 +126,11 @@ Por mes, con los días que tienen ambos datos: enero 4,3 · febrero 6,0 · marzo
 
 | Archivo | Contenido |
 | --- | --- |
-| `datos/mediciones.csv` | Tabla larga: fecha, entidad, variable, valor, calidad, incluir, página. 661 filas (energía, ICE, producción y planta) |
-| `datos/produccion_l22_detalle.csv` | Producción de la L22 por fecha, turno y SKU (327 registros) |
-| `datos/produccion_l22_diaria.csv` | kg por día y turno (161 días) |
-| `importar_produccion.py` | Extrae la producción de la L22 del Excel de kg producidos |
+| `datos/mediciones.csv` | Tabla larga: fecha, entidad, variable, valor, calidad, incluir, página. 3.386 filas: energía de L22 y L14 completas y de L16, L10_50, L18_21 y L20 del 11 may al 6 jun; ICE de L22 y L14; producción de 7 líneas; planta |
+| `datos/produccion_detalle.csv` | Producción por fecha, línea, turno y SKU (1.826 registros) |
+| `datos/produccion_diaria.csv` | kg por día, línea y turno |
+| `importar_produccion.py` | Extrae la producción de cada línea del Excel de kg producidos |
+| `COMPARACION_LINEAS.md` | Consumo reciente de todas las líneas y comparación L22 vs L14 |
 | `datos/parametros.csv` | Factores y escalas del informe |
 | `datos/equipos.csv` | Equipos de la L22 |
 | `datos/turnos.csv` | Turno de mayor consumo (L22 y planta) |
