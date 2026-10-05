@@ -67,7 +67,7 @@ Festivos sin dato (lunes): 23 de marzo y 18 de mayo.
 ## 5. Datos que faltan para la línea base
 
 - [x] Producción diaria de la L22 (recibida: Excel KG producidos, ver sección 7).
-- [ ] Consumo de aire comprimido de la L22 en m³/día desde marzo.
+- [ ] Aire comprimido: **no existe medición por línea**, solo de toda la planta (compresores Kaeser). Hay que asignar a la L22 una parte del aire de la planta (ver sección 7, hallazgo 4).
 - [x] Producción de la semana 4 de febrero (sí hubo, ver sección 7).
 - [ ] Registro de paros con duración y causa.
 - [ ] Energía de la L22 del 24 al 29 de abril, del 4 al 8 de mayo y desde el 7 de junio (hay producción pero no energía).
@@ -112,7 +112,7 @@ Por mes, con los días que tienen ambos datos: enero 4,3 · febrero 6,0 · marzo
 1. **El consumo casi no depende de lo que se produce.** Unos 74 kWh/día son fijos y cada tonelada solo agrega 1,4 kWh. En un día promedio, cerca del 78% del consumo es fijo (74 de 95 kWh). Es la principal oportunidad del esquema.
 2. **Mantenimiento con consumo de día productivo.** El 10 y 11 de marzo hubo mantenimiento sin producción y la línea consumió 84 kWh/día, casi lo mismo que produciendo.
 3. **Consumo base sin producción.** Los sábados y días sin producción la línea consume entre 25 y 37 kWh (31 ene, 28 feb, 24 mar, 30 may).
-4. **El ICE del informe incluye mucho aire.** El ICE del informe es en promedio 1,5 veces el kWh/t eléctrico. Si el informe usó estos mismos kg, el aire comprimido sería cerca del 36% de la energía de la L22 (≈ 51 kWh/día, ≈ 340 m³/día). Es más que el 23,82% general del informe; **hay que confirmarlo con la medición de aire.**
+4. **El ICE del informe incluye mucho aire.** El ICE del informe es en promedio 1,5 veces el kWh/t eléctrico. Si el informe usó estos mismos kg, el aire comprimido sería cerca del 36% de la energía de la L22 (≈ 51 kWh/día, ≈ 340 m³/día). Es más que el 23,82% general del informe. Como el aire solo se mide para toda la planta, este 36% (y el ICE del informe) depende de cómo el informe repartió el aire entre líneas, y ese método no está explicado. **Para la L22 hay que estimar el aire con un reparto propio** (por producción, por inventario neumático o con una medición temporal en el ramal de la línea).
 5. **Confirmado el error del 7 de febrero.** Ese sábado se produjeron 11,6 t, un día normal; los 731,7 kWh son error del medidor.
 6. **Producción sin energía medida:** 30 mar, 24–29 abr y 4–8 may (11 días, ≈ 258 t), además de todo lo posterior al 6 de junio.
 
