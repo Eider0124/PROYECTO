@@ -5,12 +5,13 @@ Cada día se agregan las lecturas nuevas a lecturas.csv y se vuelve a ejecutar.
 El Excel resultante funciona sin internet: todo se calcula con fórmulas.
 """
 import csv
-from datetime import date, time
+from datetime import datetime, time, timedelta
 from pathlib import Path
 
 from openpyxl import Workbook
 from openpyxl.chart import BarChart, Reference
 from openpyxl.formatting.rule import FormulaRule
+from openpyxl.utils import get_column_letter
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.worksheet.table import Table, TableStyleInfo
@@ -50,14 +51,19 @@ def ip_key(ip):
 
 def leer_datos():
     with open(BASE / "medidores.csv", newline="", encoding="utf-8") as fh:
-        medidores = [(r["ip"], r["nombre"]) for r in csv.DictReader(fh)]
+        filas = list(csv.DictReader(fh))
+    medidores = [(r["ip"], r["nombre"]) for r in filas]
+    # Varios medidores tienen el reloj en UTC; desfase_h lo lleva a hora de Colombia
+    desfase = {r["ip"]: int(r.get("desfase_h") or 0) for r in filas}
     lecturas = []
     with open(BASE / "lecturas.csv", newline="", encoding="utf-8") as fh:
         for r in csv.DictReader(fh):
-            h, m = map(int, r["hora"].split(":"))
             num = lambda v: float(v) if v.strip() else None
-            lecturas.append((date.fromisoformat(r["fecha"]), r["ip"], time(h, m),
-                             num(r["kwh"]), num(r["kvarh"]), num(r["kvah"])))
+            en_medidor = datetime.fromisoformat(f"{r['fecha']} {r['hora']}")
+            local = en_medidor + timedelta(hours=desfase.get(r["ip"], 0))
+            lecturas.append((local.date(), r["ip"], local.time(),
+                             num(r["kwh"]), num(r["kvarh"]), num(r["kvah"]),
+                             en_medidor.strftime("%Y-%m-%d %H:%M")))
     # El cálculo de kW por intervalo compara cada fila con la anterior,
     # así que los datos deben ir ordenados por fecha, medidor y hora.
     lecturas.sort(key=lambda r: (r[0], ip_key(r[1]), r[2]))
@@ -75,9 +81,9 @@ def encabezado(ws, fila, columnas, col0=1):
 
 def hoja_datos(wb, lecturas):
     ws = wb.create_sheet("Datos")
-    cols = ["Fecha", "IP", "Hora", "kWh", "kVARh", "kVAh", "Minuto", "kW intervalo", "Línea"]
+    cols = ["Fecha", "IP", "Hora", "kWh", "kVARh", "kVAh", "Minuto", "kW intervalo", "Línea", "Hora en el medidor"]
     encabezado(ws, 1, cols)
-    for i, (d, ip, t, kwh, kvarh, kvah) in enumerate(lecturas, start=2):
+    for i, (d, ip, t, kwh, kvarh, kvah, crudo) in enumerate(lecturas, start=2):
         ws.cell(i, 1, d).number_format = "yyyy-mm-dd"
         ws.cell(i, 2, ip)
         ws.cell(i, 3, t).number_format = "hh:mm"
@@ -88,13 +94,14 @@ def hoja_datos(wb, lecturas):
         ws.cell(i, 8, f'=IF(AND(B{i}=B{i-1},A{i}=A{i-1},D{i}>0,N(D{i-1})>0,G{i}>N(G{i-1})),'
                       f'(D{i}-D{i-1})/((G{i}-G{i-1})/60),"")').number_format = "#,##0.00"
         ws.cell(i, 9, f'=IFERROR(INDEX(Medidores!$B:$B,MATCH(B{i},Medidores!$A:$A,0)),"")')
-        for col in range(1, 10):
+        ws.cell(i, 10, crudo)
+        for col in range(1, 11):
             ws.cell(i, col).font = f_base
     last = max(len(lecturas) + 1, 2)
-    tabla = Table(displayName="tDatos", ref=f"A1:I{last}")
+    tabla = Table(displayName="tDatos", ref=f"A1:J{last}")
     tabla.tableStyleInfo = TableStyleInfo(name="TableStyleLight1", showRowStripes=True)
     ws.add_table(tabla)
-    for col, w in zip("ABCDEFGHI", [12, 15, 8, 14, 14, 14, 9, 13, 18]):
+    for col, w in zip("ABCDEFGHIJ", [12, 15, 8, 14, 14, 14, 9, 13, 18, 19]):
         ws.column_dimensions[col].width = w
     ws.freeze_panes = "A2"
     return ws
@@ -124,44 +131,50 @@ def hoja_tablero(wb, medidores, dias, medidor_inicial):
     ws = wb.active
     ws.title = "Tablero"
     ws.sheet_view.showGridLines = False
-    for col, w in zip("ABCDEFGHIJKLM", [2, 22, 15, 17, 9, 9, 10, 14, 14, 14, 11, 9, 17]):
-        ws.column_dimensions[col].width = w
+    anchos = [2, 20, 14, 16, 8, 8, 9, 12, 12, 12, 10, 8, 10, 10, 9, 12, 11, 15]
+    for i, w in enumerate(anchos, start=1):
+        ws.column_dimensions[get_column_letter(i)].width = w
 
     ws["B1"] = "Monitoreo de Energía"
     ws["B1"].font = f_titulo
-    ws["B2"] = "Data Log de medidores de planta · consumo calculado como última lectura − primera lectura válida del día"
+    ws["B2"] = "Data Log de medidores de planta · horas en hora de Colombia (los medidores en UTC se corrigen −5 h)"
     ws["B2"].font = f_sub
 
-    ws["B4"] = "DÍA (elige de la lista)"
-    ws["E4"] = "MEDIDOR PARA LA GRÁFICA DE 15 MIN"
-    for ref in ("B4", "E4"):
+    ws["B4"] = "DÍA"
+    ws["D4"] = "HORA DE CORTE 24 h"
+    ws["F4"] = "MEDIDOR PARA LA GRÁFICA DE 15 MIN"
+    for ref in ("B4", "D4", "F4"):
         ws[ref].font = f_label
     ws["B5"] = dias[-1] if dias else None
     ws["B5"].number_format = "yyyy-mm-dd"
-    ws.merge_cells("E5:G5")
-    ws["E5"] = medidor_inicial
-    for ref in ("B5", "E5"):
+    ws["D5"] = time(14, 45)
+    ws["D5"].number_format = "hh:mm"
+    ws.merge_cells("F5:H5")
+    ws["F5"] = medidor_inicial
+    for ref in ("B5", "D5", "F5"):
         ws[ref].font, ws[ref].fill, ws[ref].border = f_input, fill_input, borde
         ws[ref].alignment = Alignment(horizontal="center")
-    ws["H5"] = '=IFERROR(INDEX(Medidores!$A:$A,MATCH($E$5,Medidores!$B:$B,0)),"")'
-    ws["H5"].font = f_sub
+    ws["I5"] = '=IFERROR(INDEX(Medidores!$A:$A,MATCH($F$5,Medidores!$B:$B,0)),"")'
+    ws["I5"].font = f_sub
 
-    dv_dia = DataValidation(type="list", formula1="=Histórico!$A$3:$A$1000", allow_blank=False,
+    dv_dia = DataValidation(type="list", formula1=f"=Histórico!$A$3:$A${2 + max(len(dias), 1)}", allow_blank=False,
                             error="Elige un día de la lista.", errorTitle="Día no válido")
     dv_med = DataValidation(type="list", formula1="=Medidores!$B$2:$B$200", allow_blank=False,
                             error="Elige un medidor de la lista.", errorTitle="Medidor no válido")
-    ws.add_data_validation(dv_dia)
-    ws.add_data_validation(dv_med)
-    dv_dia.add("B5")
-    dv_med.add("E5")
+    dv_hora = DataValidation(type="time", operator="between", formula1="0", formula2="0.999",
+                             error="Escribe una hora, por ejemplo 14:45.", errorTitle="Hora no válida")
+    for dv, ref in ((dv_dia, "B5"), (dv_med, "F5"), (dv_hora, "D5")):
+        ws.add_data_validation(dv)
+        dv.add(ref)
 
     n = len(medidores)
     r0, r1 = 12, 12 + n - 1
     kpis = [
         ("B", "CONSUMO DEL PERIODO (kWh)", f"=SUM(H{r0}:H{r1})", NUM1),
         ("D", "DEMANDA MEDIA TOTAL (kW)", f"=SUM(K{r0}:K{r1})", NUM1),
-        ("H", "FACTOR DE POTENCIA", f'=IFERROR(SUMPRODUCT(--ISNUMBER(L{r0}:L{r1}),H{r0}:H{r1})/SUM(J{r0}:J{r1}),"")', "0.000"),
-        ("J", "MEDIDORES CON AVISO", f'=COUNTIF(D{r0}:D{r1},"<>Normal")&" de "&COUNTA(C{r0}:C{r1})', "@"),
+        ("G", "CONSUMO 24 h AL CORTE (kWh)", f'=IF(COUNT(P{r0}:P{r1})=0,"Falta el día anterior",SUM(P{r0}:P{r1}))', NUM1),
+        ("J", "FACTOR DE POTENCIA", f'=IFERROR(SUMPRODUCT(--ISNUMBER(L{r0}:L{r1}),H{r0}:H{r1})/SUM(J{r0}:J{r1}),"")', "0.000"),
+        ("M", "MEDIDORES CON AVISO", f'=COUNTIF(D{r0}:D{r1},"<>Normal")&" de "&COUNTA(C{r0}:C{r1})', "@"),
     ]
     for col, label, formula, fmt in kpis:
         ws[f"{col}7"] = label
@@ -171,53 +184,78 @@ def hoja_tablero(wb, medidores, dias, medidor_inicial):
         c.alignment = Alignment(horizontal="left")
 
     cols = ["Línea", "IP", "Estado", "Desde", "Hasta", "Lecturas", "kWh", "kVARh", "kVAh",
-            "kW medio", "FP", "Última lectura kWh", "válidas", "en cero", "con kVAh"]
+            "kW medio", "FP", "kVARh / kWh", "kW máx 15 min", "Hora kW máx", "kWh 24 h al corte",
+            "kW medio vs día anterior", "Última lectura kWh", "válidas", "en cero", "con kVAh", "kW medio día ant."]
     encabezado(ws, 11, cols, col0=2)
+    ws.row_dimensions[11].height = 30
+    corte = "(HOUR($D$5)*60+MINUTE($D$5))"
     for i in range(n):
         r = r0 + i
         cr = crit(f"$C{r}", "$B$5")
         valid = f'{cr},Datos!$D:$D,">0"'
+        ant = crit(f"$C{r}", "$B$5-1")
+        valid_ant = f'{ant},Datos!$D:$D,">0"'
         f = {
             "B": f"=Medidores!B{i + 2}",
             "C": f"=Medidores!A{i + 2}",
-            "D": f'=IF(N{r}<2,"Sin datos",IF(O{r}>0,"Lectura en cero",IF(P{r}<2,"Falta kVAh",IF(H{r}<=0.001,"Sin consumo","Normal"))))',
-            "E": f'=IF(N{r}<2,"",_xlfn.MINIFS(Datos!$G:$G,{valid})/1440)',
-            "F": f'=IF(N{r}<2,"",_xlfn.MAXIFS(Datos!$G:$G,{valid})/1440)',
+            "D": (f'=IF(S{r}<2,"Sin datos",IF(T{r}>0,"Lectura en cero",IF(U{r}<2,"Falta kVAh",'
+                  f'IF(H{r}<=0.001,"Sin consumo",IF(AND(ISNUMBER(M{r}),M{r}>0.5),"Reactiva > 50 %","Normal")))))'),
+            "E": f'=IF(S{r}<2,"",_xlfn.MINIFS(Datos!$G:$G,{valid})/1440)',
+            "F": f'=IF(S{r}<2,"",_xlfn.MAXIFS(Datos!$G:$G,{valid})/1440)',
             "G": f"=COUNTIFS({cr})",
-            "H": f'=IF(N{r}<2,"",_xlfn.MAXIFS(Datos!$D:$D,{valid})-_xlfn.MINIFS(Datos!$D:$D,{valid}))',
-            "I": f'=IF(N{r}<2,"",_xlfn.MAXIFS(Datos!$E:$E,{valid})-_xlfn.MINIFS(Datos!$E:$E,{valid}))',
-            "J": f'=IF(P{r}<2,"",_xlfn.MAXIFS(Datos!$F:$F,{cr},Datos!$F:$F,">0")-_xlfn.MINIFS(Datos!$F:$F,{cr},Datos!$F:$F,">0"))',
+            "H": f'=IF(S{r}<2,"",_xlfn.MAXIFS(Datos!$D:$D,{valid})-_xlfn.MINIFS(Datos!$D:$D,{valid}))',
+            "I": f'=IF(S{r}<2,"",_xlfn.MAXIFS(Datos!$E:$E,{valid})-_xlfn.MINIFS(Datos!$E:$E,{valid}))',
+            "J": f'=IF(U{r}<2,"",_xlfn.MAXIFS(Datos!$F:$F,{cr},Datos!$F:$F,">0")-_xlfn.MINIFS(Datos!$F:$F,{cr},Datos!$F:$F,">0"))',
             "K": f'=IF(H{r}="","",IF(F{r}>E{r},H{r}/((F{r}-E{r})*24),""))',
             "L": f'=IF(OR(H{r}="",J{r}=""),"",IF(J{r}>0,H{r}/J{r},""))',
-            "M": f'=IF(N{r}=0,"",_xlfn.MAXIFS(Datos!$D:$D,{valid}))',
-            "N": f"=COUNTIFS({valid})",
-            "O": f"=COUNTIFS({cr},Datos!$D:$D,0)",
-            "P": f'=COUNTIFS({cr},Datos!$F:$F,">0")',
+            "M": f'=IF(OR(H{r}="",I{r}=""),"",IF(H{r}>0,I{r}/H{r},""))',
+            "N": f'=IF(S{r}<2,"",_xlfn.MAXIFS(Datos!$H:$H,{cr}))',
+            "O": f'=IF(N{r}="","",_xlfn.MINIFS(Datos!$G:$G,{cr},Datos!$H:$H,N{r})/1440)',
+            "P": (f'=IF(OR(COUNTIFS({valid},Datos!$G:$G,{corte})=0,COUNTIFS({valid_ant},Datos!$G:$G,{corte})=0),"",'
+                  f'SUMIFS(Datos!$D:$D,{valid},Datos!$G:$G,{corte})-SUMIFS(Datos!$D:$D,{valid_ant},Datos!$G:$G,{corte}))'),
+            "Q": f'=IF(OR(K{r}="",V{r}=""),"",IF(V{r}>0,K{r}/V{r}-1,""))',
+            "R": f'=IF(S{r}=0,"",_xlfn.MAXIFS(Datos!$D:$D,{valid}))',
+            "S": f"=COUNTIFS({valid})",
+            "T": f"=COUNTIFS({cr},Datos!$D:$D,0)",
+            "U": f'=COUNTIFS({cr},Datos!$F:$F,">0")',
+            "V": (f'=IF(COUNTIFS({valid_ant})<2,"",IFERROR((_xlfn.MAXIFS(Datos!$D:$D,{valid_ant})-_xlfn.MINIFS(Datos!$D:$D,{valid_ant}))'
+                  f'/((_xlfn.MAXIFS(Datos!$G:$G,{valid_ant})-_xlfn.MINIFS(Datos!$G:$G,{valid_ant}))/60),""))'),
         }
         fmts = {"E": "hh:mm", "F": "hh:mm", "H": NUM3, "I": NUM3, "J": NUM3, "K": "#,##0.00",
-                "L": "0.000", "M": NUM3}
+                "L": "0.000", "M": "0%", "N": "#,##0.00", "O": "hh:mm", "P": NUM1,
+                "Q": "+0%;-0%;0%", "R": NUM3}
         for col, formula in f.items():
             c = ws[f"{col}{r}"]
             c.value, c.font, c.border = formula, f_base, borde
             c.number_format = fmts.get(col, "General")
-            if col in "DEFG":
+            if col in "DEFGO":
                 c.alignment = Alignment(horizontal="center")
-    for col in "NOP":
+    for col in "STUV":
         ws.column_dimensions[col].hidden = True
 
     rng = f"D{r0}:D{r1}"
-    ws.conditional_formatting.add(rng, FormulaRule(formula=[f'D{r0}="Normal"'], fill=PatternFill("solid", fgColor=VERDE_SUAVE), font=Font(name=F, color=VERDE, bold=True)))
-    ws.conditional_formatting.add(rng, FormulaRule(formula=[f'D{r0}="Sin datos"'], fill=PatternFill("solid", fgColor=ROJO_SUAVE), font=Font(name=F, color="B3261E", bold=True)))
-    ws.conditional_formatting.add(rng, FormulaRule(formula=[f'D{r0}<>"Normal"'], fill=PatternFill("solid", fgColor=AMBAR_SUAVE), font=Font(name=F, color="A46A00", bold=True)))
+    estilo = lambda fondo, tinta: dict(fill=PatternFill("solid", fgColor=fondo), font=Font(name=F, color=tinta, bold=True))
+    ws.conditional_formatting.add(rng, FormulaRule(formula=[f'D{r0}="Normal"'], **estilo(VERDE_SUAVE, VERDE)))
+    ws.conditional_formatting.add(rng, FormulaRule(formula=[f'OR(D{r0}="Sin datos",D{r0}="Reactiva > 50 %")'], **estilo(ROJO_SUAVE, "B3261E")))
+    ws.conditional_formatting.add(rng, FormulaRule(formula=[f'D{r0}<>"Normal"'], **estilo(AMBAR_SUAVE, "A46A00")))
+    ws.conditional_formatting.add(f"M{r0}:M{r1}", FormulaRule(formula=[f'AND(ISNUMBER(M{r0}),M{r0}>0.5)'], **estilo(ROJO_SUAVE, "B3261E")))
+    ws.conditional_formatting.add(f"L{r0}:L{r1}", FormulaRule(formula=[f'AND(ISNUMBER(L{r0}),L{r0}<0.9)'], **estilo(AMBAR_SUAVE, "A46A00")))
 
     nota = r1 + 2
-    ws[f"B{nota}"] = ("Celdas amarillas: se eligen de la lista. FP = kWh ÷ kVAh. kW medio = kWh ÷ horas del periodo. "
-                      "Las lecturas en cero se excluyen del cálculo.")
-    ws[f"B{nota}"].font = f_sub
+    notas = [
+        "Celdas amarillas: día y medidor se eligen de la lista; la hora de corte se escribe (ej. 14:45).",
+        "kWh 24 h al corte = lectura del día a la hora de corte − lectura del día anterior a la misma hora. Requiere ambas lecturas.",
+        "kVARh / kWh > 50 %: la energía reactiva supera el límite de la CREG y se factura. FP en ámbar cuando es menor a 0.90.",
+        "kW medio vs día anterior compara la demanda media del periodo registrado de cada día. Las lecturas en cero se excluyen.",
+    ]
+    for k, txt in enumerate(notas):
+        ws[f"B{nota + k}"] = txt
+        ws[f"B{nota + k}"].font = f_sub
+    chart_row = nota + len(notas) + 1
 
     bar = BarChart()
     bar.type = "bar"
-    bar.title = "Consumo por medidor (kWh)"
+    bar.title = "Consumo por medidor en el periodo (kWh)"
     bar.style = 2
     bar.add_data(Reference(ws, min_col=8, min_row=11, max_row=r1), titles_from_data=True)
     bar.set_categories(Reference(ws, min_col=2, min_row=r0, max_row=r1))
@@ -229,7 +267,7 @@ def hoja_tablero(wb, medidores, dias, medidor_inicial):
     bar.series[0].graphicalProperties.solidFill = VERDE
     bar.series[0].graphicalProperties.line.noFill = True
     bar.height, bar.width = 9, 15
-    ws.add_chart(bar, f"B{nota + 2}")
+    ws.add_chart(bar, f"B{chart_row}")
 
     calc = wb["Calc"]
     col = BarChart()
@@ -246,7 +284,7 @@ def hoja_tablero(wb, medidores, dias, medidor_inicial):
     col.series[0].graphicalProperties.solidFill = VERDE
     col.series[0].graphicalProperties.line.noFill = True
     col.height, col.width = 9, 17
-    ws.add_chart(col, f"H{nota + 2}")
+    ws.add_chart(col, f"I{chart_row}")
     ws.freeze_panes = "A6"
 
 
@@ -259,7 +297,7 @@ def hoja_calc(wb):
         ws.cell(r, 1, mins)
         # Etiqueta = inicio del intervalo de 15 min que termina en `mins`
         ws.cell(r, 2, f"{(mins - 15) // 60:02d}:{(mins - 15) % 60:02d}")
-        cr = "Datos!$B:$B,Tablero!$H$5,Datos!$A:$A,Tablero!$B$5,Datos!$G:$G,$A" + str(r)
+        cr = "Datos!$B:$B,Tablero!$I$5,Datos!$A:$A,Tablero!$B$5,Datos!$G:$G,$A" + str(r)
         ws.cell(r, 3, f'=IF(COUNTIFS({cr},Datos!$H:$H,">=0")=0,"",SUMIFS(Datos!$H:$H,{cr}))').number_format = "#,##0.00"
         for c in range(1, 4):
             ws.cell(r, c).font = f_base
@@ -290,6 +328,24 @@ def hoja_historico(wb, medidores, dias):
         ws.column_dimensions[ws.cell(2, i).column_letter].width = 15
     ws.freeze_panes = "B3"
 
+    # Segunda tabla: consumo de 24 h entre la hora de corte de un día y la del anterior
+    t2 = len(dias) + 5
+    ws.cell(t2 - 1, 1, "Consumo de 24 h al corte (kWh) · hora de corte en Tablero!D5").font = Font(name=F, size=13, bold=True)
+    encabezado(ws, t2, ["Fecha"] + [n for _, n in medidores] + ["Total"])
+    corte = "(HOUR(Tablero!$D$5)*60+MINUTE(Tablero!$D$5))"
+    for d_i, d in enumerate(dias):
+        r = t2 + 1 + d_i
+        ws.cell(r, 1, d).number_format = "yyyy-mm-dd"
+        ws.cell(r, 1).font = f_base
+        for m_i, (ip, _) in enumerate(medidores):
+            hoy = f'Datos!$B:$B,"{ip}",Datos!$A:$A,$A{r},Datos!$D:$D,">0",Datos!$G:$G,{corte}'
+            ayer = f'Datos!$B:$B,"{ip}",Datos!$A:$A,$A{r}-1,Datos!$D:$D,">0",Datos!$G:$G,{corte}'
+            c = ws.cell(r, 2 + m_i, f'=IF(OR(COUNTIFS({hoy})=0,COUNTIFS({ayer})=0),"",SUMIFS(Datos!$D:$D,{hoy})-SUMIFS(Datos!$D:$D,{ayer}))')
+            c.number_format, c.font, c.border = NUM1, f_base, borde
+        first, lastc = ws.cell(r, 2).coordinate, ws.cell(r, last_col - 1).coordinate
+        c = ws.cell(r, last_col, f'=IF(COUNT({first}:{lastc})=0,"",SUM({first}:{lastc}))')
+        c.number_format, c.font, c.border = NUM1, Font(name=F, size=10, bold=True), borde
+
     if dias:
         ch = BarChart()
         ch.type = "col"
@@ -302,7 +358,7 @@ def hoja_historico(wb, medidores, dias):
         ch.x_axis.number_format = "yyyy-mm-dd"
         ch.series[0].graphicalProperties.solidFill = VERDE
         ch.height, ch.width = 8, 18
-        ws.add_chart(ch, f"A{len(dias) + 5}")
+        ws.add_chart(ch, f"A{2 * len(dias) + 8}")
 
 
 def hoja_instrucciones(wb):
@@ -315,6 +371,9 @@ def hoja_instrucciones(wb):
         ("   Las columnas Minuto, kW intervalo y Línea se calculan solas. Mantén las filas ordenadas por Fecha, IP y Hora (de menor a mayor).", f_base),
         ("3. Si agregas un día nuevo a mano, escribe también esa fecha al final de la columna A de la hoja Histórico y copia las fórmulas de la fila anterior.", f_base),
         ("4. Los nombres de las líneas se cambian en la hoja Medidores.", f_base),
+        ("5. Reloj de los medidores: varios guardan la hora en UTC (5 horas adelante). La hoja Medidores indica el desfase de cada uno", f_base),
+        ("   y las horas de Datos ya están en hora de Colombia; la columna Hora en el medidor conserva la hora original.", f_base),
+        ("6. Hora de corte (Tablero!D5): se usa para el consumo de 24 h. Tomando las fotos a las 3:00 p. m., la lectura común de todos es 14:45.", f_base),
         ("Requiere Excel 2019 o Microsoft 365 (usa las funciones MAXIFS y MINIFS). No necesita internet.", f_sub),
         ("Fuente de los datos: fotos de la pantalla Data Log de cada medidor, transcritas.", f_sub),
     ]
@@ -333,7 +392,7 @@ def main():
     # Medidor con más consumo el último día, para que la gráfica abra con datos
     ultimo = [r for r in lecturas if r[0] == dias[-1] and r[3]]
     delta = {}
-    for _, ip, _, kwh, _, _ in ultimo:
+    for _, ip, _, kwh, *_ in ultimo:
         lo, hi = delta.get(ip, (kwh, kwh))
         delta[ip] = (min(lo, kwh), max(hi, kwh))
     top = max(delta, key=lambda ip: delta[ip][1] - delta[ip][0])
