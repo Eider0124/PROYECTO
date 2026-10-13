@@ -5,7 +5,7 @@ Cada día se agregan las lecturas nuevas a lecturas.csv y se vuelve a ejecutar.
 El Excel resultante funciona sin internet: todo se calcula con fórmulas.
 """
 import csv
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 
 from openpyxl import Workbook
@@ -245,7 +245,7 @@ def hoja_tablero(wb, medidores, dias, medidor_inicial):
     notas = [
         "Celdas amarillas: día y medidor se eligen de la lista; la hora de corte se escribe (ej. 11:00).",
         "kWh 24 h al corte = lectura del día a la hora de corte − lectura del día anterior a la misma hora. Requiere ambas lecturas.",
-        "kVARh / kWh > 50 %: la energía reactiva supera el límite de la CREG y se factura. FP en ámbar cuando es menor a 0.90.",
+        "kVARh / kWh > 50 %: la línea consume mucha reactiva. EMCALI cobra según la frontera (hoja EMCALI), donde el banco de condensadores compensa.",
         "kW medio vs día anterior compara la demanda media del periodo registrado de cada día. Las lecturas en cero se excluyen.",
     ]
     for k, txt in enumerate(notas):
@@ -331,7 +331,7 @@ def hoja_historico(wb, medidores, dias):
     # Segunda tabla: consumo de 24 h entre la hora de corte de un día y la del anterior
     t2 = len(dias) + 5
     ws.cell(t2 - 1, 1, "Consumo de 24 h al corte (kWh) · hora de corte en Tablero!D5").font = Font(name=F, size=13, bold=True)
-    encabezado(ws, t2, ["Fecha"] + [n for _, n in medidores] + ["Total"])
+    encabezado(ws, t2, ["Fecha"] + [n for _, n in medidores] + ["Total", "EMCALI", "Diferencia", "Diferencia %"])
     corte = "(HOUR(Tablero!$D$5)*60+MINUTE(Tablero!$D$5))"
     for d_i, d in enumerate(dias):
         r = t2 + 1 + d_i
@@ -345,6 +345,21 @@ def hoja_historico(wb, medidores, dias):
         first, lastc = ws.cell(r, 2).coordinate, ws.cell(r, last_col - 1).coordinate
         c = ws.cell(r, last_col, f'=IF(COUNT({first}:{lastc})=0,"",SUM({first}:{lastc}))')
         c.number_format, c.font, c.border = NUM1, Font(name=F, size=10, bold=True), borde
+        # EMCALI en la misma ventana: horas >= corte del día anterior + horas < corte del día
+        hc = "HOUR(Tablero!$D$5)"
+        tot, em = ws.cell(r, last_col).coordinate, ws.cell(r, last_col + 1).coordinate
+        f_em = (f'=IF(OR(COUNTIFS(EMCALI!$A:$A,$A{r}-1)<24,COUNTIFS(EMCALI!$A:$A,$A{r})<24),"",'
+                f'SUMIFS(EMCALI!$C:$C,EMCALI!$A:$A,$A{r}-1,EMCALI!$B:$B,">="&{hc})+SUMIFS(EMCALI!$C:$C,EMCALI!$A:$A,$A{r},EMCALI!$B:$B,"<"&{hc}))')
+        extras = [(f_em, NUM1), (f'=IF(OR({tot}="",{em}=""),"",{em}-{tot})', NUM1),
+                  (f'=IF(OR({tot}="",{em}=""),"",IF({em}>0,({em}-{tot})/{em},""))', "0.0%")]
+        for k, (formula, fmt) in enumerate(extras, start=1):
+            c = ws.cell(r, last_col + k, formula)
+            c.number_format, c.font, c.border = fmt, f_base, borde
+    for k in range(1, 4):
+        ws.column_dimensions[ws.cell(t2, last_col + k).column_letter].width = 13
+    nota = t2 + len(dias) + 1
+    ws.cell(nota, 1, "Diferencia = EMCALI − suma de medidores. Si es negativa, algún medidor está dentro de otro (se suma dos veces). "
+                     "EMCALI usa horas completas: con corte 11:00 toma de 11:00 a 11:00.").font = f_sub
 
     if dias:
         ch = BarChart()
@@ -358,7 +373,148 @@ def hoja_historico(wb, medidores, dias):
         ch.x_axis.number_format = "yyyy-mm-dd"
         ch.series[0].graphicalProperties.solidFill = VERDE
         ch.height, ch.width = 8, 18
-        ws.add_chart(ch, f"A{2 * len(dias) + 8}")
+        ws.add_chart(ch, f"A{2 * len(dias) + 9}")
+
+
+TURNOS = [  # (nombre, horario real, horas de EMCALI asignadas, horas por día)
+    ("A", "07:00 – 14:30", "07:00 – 14:00", 7),
+    ("B", "14:00 – 21:30", "14:00 – 21:00", 7),
+    ("C", "23:40 – 07:10", "23:00 – 07:00", 8),
+    ("Entre turnos", "21:30 – 23:40", "21:00 – 23:00", 2),
+    ("Sin turno", "Domingo y noche del sábado", "—", 24),
+]
+
+
+def leer_emcali():
+    ruta = BASE / "emcali_horario.csv"
+    if not ruta.exists():
+        return []
+    num = lambda v: float(v) if v.strip() else None
+    with open(ruta, newline="", encoding="utf-8") as fh:
+        return [(date.fromisoformat(r["fecha"]), int(r["hora_inicio"][:2]), num(r["kwh"]),
+                 num(r["kvarh_inductiva"]), num(r["kvarh_capacitiva"])) for r in csv.DictReader(fh)]
+
+
+def hoja_emcali(wb, emcali):
+    ws = wb.create_sheet("EMCALI")
+    cols = ["Fecha", "Hora inicio", "kWh", "kVARh inductiva", "kVARh capacitiva", "Día (1=lun)", "Turno", "Inductiva sobre 50 %"]
+    encabezado(ws, 1, cols)
+    for i, (d, h, kwh, ind, cap) in enumerate(emcali, start=2):
+        ws.cell(i, 1, d).number_format = "yyyy-mm-dd"
+        ws.cell(i, 2, h)
+        for col, v in ((3, kwh), (4, ind), (5, cap)):
+            ws.cell(i, col, v).number_format = "#,##0.00"
+        ws.cell(i, 6, f"=WEEKDAY(A{i},2)")
+        # Lunes a sábado: C 23–07 (el C de la noche del domingo ya es del lunes), A 07–14, B 14–21
+        ws.cell(i, 7, f'=IF(F{i}=7,IF(B{i}>=23,"C","Sin turno"),IF(B{i}<7,"C",IF(B{i}<14,"A",IF(B{i}<21,"B",'
+                      f'IF(B{i}<23,"Entre turnos",IF(F{i}=6,"Sin turno","C"))))))')
+        ws.cell(i, 8, f'=IF(D{i}="","",MAX(0,D{i}-0.5*C{i}))').number_format = "#,##0.00"
+        for col in range(1, 9):
+            ws.cell(i, col).font = f_base
+    last = max(len(emcali) + 1, 2)
+    tabla = Table(displayName="tEmcali", ref=f"A1:H{last}")
+    tabla.tableStyleInfo = TableStyleInfo(name="TableStyleLight1", showRowStripes=True)
+    ws.add_table(tabla)
+    for col, w in zip("ABCDEFGH", [12, 11, 11, 15, 16, 11, 14, 18]):
+        ws.column_dimensions[col].width = w
+    ws.freeze_panes = "A2"
+    ws["J1"] = "Datos horarios de EMCALI. Hora inicio 7 = de 07:00 a 08:00. Celdas vacías: el reporte de reactiva aún no incluye esa hora."
+    ws["J2"] = "Inductiva sobre 50 % = kVARh inductiva − 50 % de los kWh de esa hora (lo que la CREG permite facturar)."
+    for ref in ("J1", "J2"):
+        ws[ref].font = f_sub
+
+
+def hoja_turnos(wb, emcali):
+    ws = wb.create_sheet("Turnos")
+    ws.sheet_view.showGridLines = False
+    ws["A1"] = "Consumo por turno (datos de EMCALI)"
+    ws["A1"].font = Font(name=F, size=14, bold=True)
+    ws["A2"] = "Turnos de lunes a sábado. Cada hora de EMCALI se asigna al turno que la ocupa la mayor parte."
+    ws["A2"].font = f_sub
+    head = ["Turno", "Horario", "Horas EMCALI", "kWh total", "Horas registradas", "kW medio",
+            "kWh promedio por turno", "% del consumo", "kVARh inductiva", "kVARh / kWh", "Inductiva sobre 50 %"]
+    encabezado(ws, 4, head)
+    r0 = 5
+    for k, (t, real, asign, hdia) in enumerate(TURNOS):
+        r = r0 + k
+        crit_t = f'EMCALI!$G:$G,"{t}"'
+        vals = [
+            (t, "General"), (real, "General"), (asign, "General"),
+            (f"=SUMIFS(EMCALI!$C:$C,{crit_t})", "#,##0"),
+            (f"=COUNTIFS({crit_t})", "#,##0"),
+            (f'=IF(E{r}=0,"",D{r}/E{r})', "#,##0.0"),
+            (f'=IF(E{r}=0,"",F{r}*{hdia})', "#,##0"),
+            (f'=IF(SUM($D${r0}:$D${r0 + len(TURNOS) - 1})=0,"",D{r}/SUM($D${r0}:$D${r0 + len(TURNOS) - 1}))', "0.0%"),
+            (f"=SUMIFS(EMCALI!$D:$D,{crit_t})", "#,##0"),
+            (f'=IFERROR(I{r}/SUMIFS(EMCALI!$C:$C,{crit_t},EMCALI!$D:$D,"<>"),"")', "0.0%"),
+            (f"=SUMIFS(EMCALI!$H:$H,{crit_t})", "#,##0.0"),
+        ]
+        for c_i, (v, fmt) in enumerate(vals, start=1):
+            c = ws.cell(r, c_i, v)
+            c.number_format, c.font, c.border = fmt, f_base, borde
+    rt = r0 + len(TURNOS)
+    ws.cell(rt, 1, "Total").font = Font(name=F, size=10, bold=True)
+    for col, fmt in ((4, "#,##0"), (5, "#,##0"), (9, "#,##0"), (11, "#,##0.0")):
+        L = get_column_letter(col)
+        c = ws.cell(rt, col, f"=SUM({L}{r0}:{L}{rt - 1})")
+        c.number_format, c.font, c.border = fmt, Font(name=F, size=10, bold=True), borde
+    ws.cell(rt + 1, 1, "kWh promedio por turno = kW medio × horas del turno. kVARh / kWh solo cuenta horas con dato de reactiva.").font = f_sub
+    for col, w in zip("ABCDEFGHIJK", [14, 26, 15, 12, 12, 10, 14, 12, 14, 12, 15]):
+        ws.column_dimensions[col].width = w
+    ws.row_dimensions[4].height = 30
+
+    bar = BarChart()
+    bar.type = "bar"
+    bar.title = "kW medio por turno"
+    bar.add_data(Reference(ws, min_col=6, min_row=4, max_row=rt - 1), titles_from_data=True)
+    bar.set_categories(Reference(ws, min_col=1, min_row=r0, max_row=rt - 1))
+    bar.legend = None
+    bar.x_axis.delete = False
+    bar.y_axis.delete = False
+    bar.y_axis.majorGridlines = None
+    bar.series[0].graphicalProperties.solidFill = VERDE
+    bar.series[0].graphicalProperties.line.noFill = True
+    bar.height, bar.width = 7, 14
+    ws.add_chart(bar, "M4")
+
+    # Tabla diaria por turno (día calendario)
+    t0 = rt + 4
+    ws.cell(t0 - 1, 1, "kWh por día y turno (día calendario: el C de 00:00 a 07:00 y de 23:00 a 24:00)").font = Font(name=F, size=12, bold=True)
+    nombres = [t for t, *_ in TURNOS]
+    encabezado(ws, t0, ["Fecha", "Día"] + nombres + ["Total día"])
+    fechas = sorted({e[0] for e in emcali})
+    dias_sem = ["lun", "mar", "mié", "jue", "vie", "sáb", "dom"]
+    for j, d in enumerate(fechas):
+        r = t0 + 1 + j
+        ws.cell(r, 1, d).number_format = "yyyy-mm-dd"
+        ws.cell(r, 2, dias_sem[d.weekday()])
+        for k, t in enumerate(nombres):
+            c = ws.cell(r, 3 + k, f'=SUMIFS(EMCALI!$C:$C,EMCALI!$A:$A,$A{r},EMCALI!$G:$G,"{t}")')
+            c.number_format, c.border = "#,##0", borde
+        L1, L2 = get_column_letter(3), get_column_letter(2 + len(nombres))
+        c = ws.cell(r, 3 + len(nombres), f"=SUM({L1}{r}:{L2}{r})")
+        c.number_format, c.border, c.font = "#,##0", borde, Font(name=F, size=10, bold=True)
+        for col in range(1, 3 + len(nombres)):
+            ws.cell(r, col).font = f_base
+            ws.cell(r, col).border = borde
+    if fechas:
+        tot_col = 3 + len(nombres)
+        ch = BarChart()
+        ch.type = "col"
+        ch.title = "Consumo diario de la planta según EMCALI (kWh)"
+        ch.add_data(Reference(ws, min_col=tot_col, min_row=t0, max_row=t0 + len(fechas)), titles_from_data=True)
+        ch.set_categories(Reference(ws, min_col=1, min_row=t0 + 1, max_row=t0 + len(fechas)))
+        ch.legend = None
+        ch.x_axis.delete = False
+        ch.y_axis.delete = False
+        ch.x_axis.number_format = "dd/mm"
+        ch.x_axis.tickLblSkip = 7
+        ch.gapWidth = 30
+        ch.series[0].graphicalProperties.solidFill = VERDE
+        ch.series[0].graphicalProperties.line.noFill = True
+        ch.height, ch.width = 8, 22
+        ws.add_chart(ch, "M20")
+    ws.freeze_panes = "A5"
 
 
 def hoja_instrucciones(wb):
@@ -374,6 +530,7 @@ def hoja_instrucciones(wb):
         ("5. Reloj de los medidores: varios guardan la hora en UTC (5 horas adelante). La hoja Medidores indica el desfase de cada uno", f_base),
         ("   y las horas de Datos ya están en hora de Colombia; la columna Hora en el medidor conserva la hora original.", f_base),
         ("6. Hora de corte (Tablero!D5): se usa para el consumo de 24 h. Debe ser una hora que aparezca en las fotos de todos los días (hoy: 11:00).", f_base),
+        ("7. EMCALI y Turnos: los datos horarios de EMCALI se cargan desde emcali_horario.csv. La hoja Turnos reparte el consumo en A, B y C.", f_base),
         ("Requiere Excel 2019 o Microsoft 365 (usa las funciones MAXIFS y MINIFS). No necesita internet.", f_sub),
         ("Fuente de los datos: fotos de la pantalla Data Log de cada medidor, transcritas.", f_sub),
     ]
@@ -389,6 +546,9 @@ def main():
     hoja_medidores(wb, medidores)
     hoja_calc(wb)
     hoja_historico(wb, medidores, dias)
+    emcali = leer_emcali()
+    hoja_emcali(wb, emcali)
+    hoja_turnos(wb, emcali)
     # Medidor con más consumo el último día, para que la gráfica abra con datos
     ultimo = [r for r in lecturas if r[0] == dias[-1] and r[3]]
     delta = {}
@@ -398,6 +558,7 @@ def main():
     top = max(delta, key=lambda ip: delta[ip][1] - delta[ip][0])
     hoja_tablero(wb, medidores, dias, dict(medidores)[top])
     hoja_instrucciones(wb)
+    wb.move_sheet("Turnos", offset=wb.index(wb["Histórico"]) + 1 - wb.index(wb["Turnos"]))
     wb.move_sheet("Tablero", offset=-wb.index(wb["Tablero"]))
     wb.active = 0
     wb.save(SALIDA)
