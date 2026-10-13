@@ -475,7 +475,7 @@ def hoja_turnos(wb, emcali):
         vals = [
             (t, "General"), (actividad, "General"), (real, "General"), (asign, "General"),
             (f"=SUMIFS(EMCALI!$C:$C,{crit_t})", "#,##0"),
-            (f"=COUNTIFS({crit_t})", "#,##0"),
+            (f'=COUNTIFS({crit_t},EMCALI!$C:$C,"<>")', "#,##0"),
             (f'=IF(F{r}=0,"",E{r}/F{r})', "#,##0.0"),
             (f'=IF(F{r}=0,"",G{r}*{hdia})', "#,##0"),
             (f'=IF(SUM($E${r0}:$E${r0 + len(TURNOS) - 1})=0,"",E{r}/SUM($E${r0}:$E${r0 + len(TURNOS) - 1}))', "0.0%"),
@@ -551,6 +551,133 @@ def hoja_turnos(wb, emcali):
     ws.freeze_panes = "A5"
 
 
+def leer_produccion():
+    ruta = BASE / "produccion_kg.csv"
+    if not ruta.exists():
+        return []
+    with open(ruta, newline="", encoding="utf-8") as fh:
+        return [(date.fromisoformat(r["fecha"]), r["linea"], int(r["turno"]), float(r["kg"])) for r in csv.DictReader(fh)]
+
+
+def hoja_datos_prod(wb, prod):
+    ws = wb.create_sheet("DatosProd")
+    encabezado(ws, 1, ["Fecha", "Línea", "Turno", "kg", "Mes"])
+    for i, (d, linea, turno, kg) in enumerate(prod, start=2):
+        ws.cell(i, 1, d).number_format = "yyyy-mm-dd"
+        ws.cell(i, 2, linea)
+        ws.cell(i, 3, turno)
+        ws.cell(i, 4, kg).number_format = "#,##0.0"
+        ws.cell(i, 5, f"=MONTH(A{i})")
+        for col in range(1, 6):
+            ws.cell(i, col).font = f_base
+    tabla = Table(displayName="tProd", ref=f"A1:E{max(len(prod) + 1, 2)}")
+    tabla.tableStyleInfo = TableStyleInfo(name="TableStyleLight1", showRowStripes=True)
+    ws.add_table(tabla)
+    for col, w in zip("ABCDE", [12, 9, 8, 12, 7]):
+        ws.column_dimensions[col].width = w
+    ws.freeze_panes = "A2"
+    ws["G1"] = "Kg producidos por día, línea y turno (archivo KG producidos 2026, hoja Data PA 2026). Turno 1 = A, turno 2 = B."
+    ws["G1"].font = f_sub
+
+
+def hoja_produccion(wb, prod, emcali):
+    ws = wb.create_sheet("Producción")
+    ws.sheet_view.showGridLines = False
+    ws["A1"] = "Energía por tonelada producida (kWh/t)"
+    ws["A1"].font = Font(name=F, size=14, bold=True)
+    ws["A2"] = ("kWh de EMCALI (toda la planta) ÷ kg producidos. Solo se calcula en días con producción registrada "
+                "y EMCALI completo. Turno A = 07–14 h, turno B = 14–21 h; por turno solo si produjo 5 t o más.")
+    ws["A2"].font = f_sub
+    if not emcali:
+        return
+    fechas = []
+    d, fin = min(e[0] for e in emcali), max([e[0] for e in emcali] + [p[0] for p in prod])
+    while d <= fin:
+        fechas.append(d)
+        d += timedelta(days=1)
+    t0 = 12
+    t1 = t0 + len(fechas)
+    rng = lambda col: f"${col}${t0 + 1}:${col}${t1}"
+    resumen = [
+        ("DÍAS CON DATO COMPLETO", f'=COUNT({rng("G")})', "0"),
+        ("kWh/t PROMEDIO PLANTA", f'=IFERROR(SUMIFS({rng("F")},{rng("G")},">0")/SUMIFS({rng("E")},{rng("G")},">0")*1000,"")', "0.0"),
+        ("kWh/t TURNO A", f'=IFERROR(SUMIFS({rng("H")},{rng("I")},">0")/SUMIFS({rng("C")},{rng("I")},">0")*1000,"")', "0.0"),
+        ("kWh/t TURNO B", f'=IFERROR(SUMIFS({rng("J")},{rng("K")},">0")/SUMIFS({rng("D")},{rng("K")},">0")*1000,"")', "0.0"),
+        ("MEJOR DÍA (kWh/t)", f'=IF(COUNT({rng("G")})=0,"",MIN({rng("G")}))', "0.0"),
+        ("PEOR DÍA (kWh/t)", f'=IF(COUNT({rng("G")})=0,"",MAX({rng("G")}))', "0.0"),
+    ]
+    for k, (label, formula, fmt) in enumerate(resumen):
+        col = get_column_letter(1 + 2 * k)
+        ws[f"{col}4"] = label
+        ws[f"{col}4"].font = f_label
+        c = ws[f"{col}5"]
+        c.value, c.number_format, c.font, c.fill = formula, fmt, f_kpi, fill_kpi
+
+    ws.cell(t0 - 1, 1, "Detalle diario").font = Font(name=F, size=12, bold=True)
+    head = ["Fecha", "Día", "kg turno A", "kg turno B", "kg total", "kWh día (EMCALI)", "kWh/t día",
+            "kWh turno A", "kWh/t A", "kWh turno B", "kWh/t B", "Nota"]
+    encabezado(ws, t0, head)
+    ws.row_dimensions[t0].height = 30
+    dias_sem = ["lun", "mar", "mié", "jue", "vie", "sáb", "dom"]
+    for j, d in enumerate(fechas):
+        r = t0 + 1 + j
+        kgc = lambda t: f"SUMIFS(DatosProd!$D:$D,DatosProd!$A:$A,$A{r},DatosProd!$C:$C,{t})"
+        emc = lambda t, n: (f'=IF(COUNTIFS(EMCALI!$A:$A,$A{r},EMCALI!$G:$G,"{t}",EMCALI!$C:$C,"<>")<{n},"",'
+                            f'SUMIFS(EMCALI!$C:$C,EMCALI!$A:$A,$A{r},EMCALI!$G:$G,"{t}"))')
+        vals = [
+            (d, "yyyy-mm-dd"), (dias_sem[d.weekday()], "General"),
+            (f"={kgc(1)}", "#,##0"), (f"={kgc(2)}", "#,##0"),
+            (f"=SUMIFS(DatosProd!$D:$D,DatosProd!$A:$A,$A{r})", "#,##0"),
+            (f'=IF(COUNTIFS(EMCALI!$A:$A,$A{r},EMCALI!$C:$C,"<>")<24,"",SUMIFS(EMCALI!$C:$C,EMCALI!$A:$A,$A{r}))', "#,##0"),
+            (f'=IF(OR(F{r}="",E{r}=0),"",F{r}/E{r}*1000)', "0.0"),
+            (emc("A", 7), "#,##0"), (f'=IF(OR(H{r}="",C{r}<5000),"",H{r}/C{r}*1000)', "0.0"),
+            (emc("B", 7), "#,##0"), (f'=IF(OR(J{r}="",D{r}<5000),"",J{r}/D{r}*1000)', "0.0"),
+            (f'=IF(AND(E{r}=0,F{r}=""),"Sin datos",IF(E{r}=0,"Sin producción registrada",IF(F{r}="","EMCALI incompleto","")))', "General"),
+        ]
+        for c_i, (v, fmt) in enumerate(vals, start=1):
+            c = ws.cell(r, c_i, v)
+            c.number_format, c.font, c.border = fmt, f_base, borde
+    for col, w in zip("ABCDEFGHIJKL", [12, 6, 11, 11, 11, 13, 10, 12, 9, 12, 9, 24]):
+        ws.column_dimensions[col].width = w
+    ws.conditional_formatting.add(f"G{t0 + 1}:G{t1}", FormulaRule(formula=[f'AND(ISNUMBER(G{t0 + 1}),G{t0 + 1}>$C$5*1.25)'],
+                                  fill=PatternFill("solid", fgColor=AMBAR_SUAVE), font=Font(name=F, color="A46A00", bold=True)))
+    ws.cell(t1 + 1, 1, "En ámbar: días con kWh/t más de 25 % por encima del promedio de la planta.").font = f_sub
+
+    ch = BarChart()
+    ch.type = "col"
+    ch.title = "kWh por tonelada producida, por día"
+    ch.add_data(Reference(ws, min_col=7, min_row=t0, max_row=t1), titles_from_data=True)
+    ch.set_categories(Reference(ws, min_col=1, min_row=t0 + 1, max_row=t1))
+    ch.legend = None
+    ch.x_axis.delete = False
+    ch.y_axis.delete = False
+    ch.x_axis.number_format = "dd/mm"
+    ch.x_axis.tickLblSkip = 7
+    ch.gapWidth = 40
+    ch.series[0].graphicalProperties.solidFill = VERDE
+    ch.series[0].graphicalProperties.line.noFill = True
+    ch.height, ch.width = 8, 20
+    ws.add_chart(ch, "N4")
+
+    # kg por línea y mes (2026)
+    lineas = sorted({p[1] for p in prod}, key=lambda x: int(x[1:]))
+    meses = sorted({p[0].month for p in prod})
+    m0 = 4
+    ws.cell(m0 - 1, 27, "Kg producidos por línea y mes (2026)").font = Font(name=F, size=12, bold=True)
+    nombres_mes = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"]
+    encabezado(ws, m0, ["Línea"] + [nombres_mes[m - 1] for m in meses], col0=27)
+    for i, linea in enumerate(lineas + ["Total"]):
+        r = m0 + 1 + i
+        ws.cell(r, 27, linea).font = f_base
+        for k, m in enumerate(meses):
+            f = (f'=SUMIFS(DatosProd!$D:$D,DatosProd!$B:$B,"{linea}",DatosProd!$E:$E,{m})' if linea != "Total"
+                 else f'=SUMIFS(DatosProd!$D:$D,DatosProd!$E:$E,{m})')
+            c = ws.cell(r, 28 + k, f)
+            c.number_format, c.font, c.border = "#,##0", f_base if linea != "Total" else Font(name=F, size=10, bold=True), borde
+    ws.column_dimensions["AA"].width = 9
+    ws.freeze_panes = "A6"
+
+
 def hoja_instrucciones(wb):
     ws = wb.create_sheet("Instrucciones")
     ws.column_dimensions["A"].width = 110
@@ -565,6 +692,7 @@ def hoja_instrucciones(wb):
         ("   y las horas de Datos ya están en hora de Colombia; la columna Hora en el medidor conserva la hora original.", f_base),
         ("6. Hora de corte (Tablero!D5): se usa para el consumo de 24 h. Debe ser una hora que aparezca en las fotos de todos los días (hoy: 11:00).", f_base),
         ("7. EMCALI y Turnos: los datos horarios de EMCALI se cargan desde emcali_horario.csv. La hoja Turnos reparte el consumo en A, B y C.", f_base),
+        ("8. Producción: kg por día, línea y turno en produccion_kg.csv (hoja DatosProd). La hoja Producción calcula kWh por tonelada con EMCALI.", f_base),
         ("Requiere Excel 2019 o Microsoft 365 (usa las funciones MAXIFS y MINIFS). No necesita internet.", f_sub),
         ("Fuente de los datos: fotos de la pantalla Data Log de cada medidor, transcritas.", f_sub),
     ]
@@ -583,6 +711,9 @@ def main():
     emcali = leer_emcali()
     hoja_emcali(wb, emcali)
     hoja_turnos(wb, emcali)
+    prod = leer_produccion()
+    hoja_datos_prod(wb, prod)
+    hoja_produccion(wb, prod, emcali)
     # Medidor con más consumo el último día, para que la gráfica abra con datos
     ultimo = [r for r in lecturas if r[0] == dias[-1] and r[3]]
     delta = {}
@@ -593,6 +724,7 @@ def main():
     hoja_tablero(wb, medidores, dias, dict(medidores)[top])
     hoja_instrucciones(wb)
     wb.move_sheet("Turnos", offset=wb.index(wb["Histórico"]) + 1 - wb.index(wb["Turnos"]))
+    wb.move_sheet("Producción", offset=wb.index(wb["Turnos"]) + 1 - wb.index(wb["Producción"]))
     wb.move_sheet("Tablero", offset=-wb.index(wb["Tablero"]))
     wb.active = 0
     wb.save(SALIDA)
