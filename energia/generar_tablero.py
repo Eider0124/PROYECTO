@@ -147,7 +147,7 @@ def hoja_tablero(wb, medidores, dias, medidor_inicial):
         ws[ref].font = f_label
     ws["B5"] = dias[-1] if dias else None
     ws["B5"].number_format = "yyyy-mm-dd"
-    ws["D5"] = time(14, 45)
+    ws["D5"] = time(11, 0)
     ws["D5"].number_format = "hh:mm"
     ws.merge_cells("F5:H5")
     ws["F5"] = medidor_inicial
@@ -243,7 +243,7 @@ def hoja_tablero(wb, medidores, dias, medidor_inicial):
 
     nota = r1 + 2
     notas = [
-        "Celdas amarillas: día y medidor se eligen de la lista; la hora de corte se escribe (ej. 14:45).",
+        "Celdas amarillas: día y medidor se eligen de la lista; la hora de corte se escribe (ej. 11:00).",
         "kWh 24 h al corte = lectura del día a la hora de corte − lectura del día anterior a la misma hora. Requiere ambas lecturas.",
         "kVARh / kWh > 50 %: la energía reactiva supera el límite de la CREG y se factura. FP en ámbar cuando es menor a 0.90.",
         "kW medio vs día anterior compara la demanda media del periodo registrado de cada día. Las lecturas en cero se excluyen.",
@@ -373,7 +373,7 @@ def hoja_instrucciones(wb):
         ("4. Los nombres de las líneas se cambian en la hoja Medidores.", f_base),
         ("5. Reloj de los medidores: varios guardan la hora en UTC (5 horas adelante). La hoja Medidores indica el desfase de cada uno", f_base),
         ("   y las horas de Datos ya están en hora de Colombia; la columna Hora en el medidor conserva la hora original.", f_base),
-        ("6. Hora de corte (Tablero!D5): se usa para el consumo de 24 h. Tomando las fotos a las 3:00 p. m., la lectura común de todos es 14:45.", f_base),
+        ("6. Hora de corte (Tablero!D5): se usa para el consumo de 24 h. Debe ser una hora que aparezca en las fotos de todos los días (hoy: 11:00).", f_base),
         ("Requiere Excel 2019 o Microsoft 365 (usa las funciones MAXIFS y MINIFS). No necesita internet.", f_sub),
         ("Fuente de los datos: fotos de la pantalla Data Log de cada medidor, transcritas.", f_sub),
     ]
