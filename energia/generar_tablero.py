@@ -107,19 +107,36 @@ def hoja_datos(wb, lecturas):
     return ws
 
 
+def leer_padres():
+    """IP del medidor que contiene a cada uno (vacío si está directo en la frontera)."""
+    with open(BASE / "medidores.csv", newline="", encoding="utf-8") as fh:
+        return {r["ip"]: (r.get("dentro_de") or "").strip() for r in csv.DictReader(fh)}
+
+
+def leer_desfases():
+    with open(BASE / "medidores.csv", newline="", encoding="utf-8") as fh:
+        return {r["ip"]: int(r.get("desfase_h") or 0) for r in csv.DictReader(fh)}
+
+
 def hoja_medidores(wb, medidores):
     ws = wb.create_sheet("Medidores")
-    encabezado(ws, 1, ["IP", "Nombre de la línea"])
+    padres, desfases = leer_padres(), leer_desfases()
+    encabezado(ws, 1, ["IP", "Nombre de la línea", "Dentro de (IP)", "Reloj del medidor"])
     for i, (ip, nombre) in enumerate(medidores, start=2):
         ws.cell(i, 1, ip).font = f_base
         c = ws.cell(i, 2, nombre)
         c.font = Font(name=F, size=10, color="0000FF")
-        for col in (1, 2):
+        c = ws.cell(i, 3, padres.get(ip) or None)
+        c.font = Font(name=F, size=10, color="0000FF")
+        ws.cell(i, 4, "UTC (−5 h)" if desfases.get(ip) else "Hora Colombia").font = f_base
+        for col in (1, 2, 3, 4):
             ws.cell(i, col).border = borde
-    ws.column_dimensions["A"].width = 16
-    ws.column_dimensions["B"].width = 24
-    ws["D1"] = "Puedes cambiar los nombres de la columna B; el tablero se actualiza solo."
-    ws["D1"].font = f_sub
+    for col, w in zip("ABCD", [16, 24, 16, 18]):
+        ws.column_dimensions[col].width = w
+    ws["F1"] = "Puedes cambiar los nombres de la columna B; el tablero se actualiza solo."
+    ws["F2"] = "Dentro de: medidor que ya incluye este consumo. No se suma dos veces en los totales, salvo que ese medidor no tenga dato."
+    for ref in ("F1", "F2"):
+        ws[ref].font = f_sub
     return ws
 
 
@@ -170,10 +187,10 @@ def hoja_tablero(wb, medidores, dias, medidor_inicial):
     n = len(medidores)
     r0, r1 = 12, 12 + n - 1
     kpis = [
-        ("B", "CONSUMO DEL PERIODO (kWh)", f"=SUM(H{r0}:H{r1})", NUM1),
-        ("D", "DEMANDA MEDIA TOTAL (kW)", f"=SUM(K{r0}:K{r1})", NUM1),
-        ("G", "CONSUMO 24 h AL CORTE (kWh)", f'=IF(COUNT(P{r0}:P{r1})=0,"Falta el día anterior",SUM(P{r0}:P{r1}))', NUM1),
-        ("J", "FACTOR DE POTENCIA", f'=IFERROR(SUMPRODUCT(--ISNUMBER(L{r0}:L{r1}),H{r0}:H{r1})/SUM(J{r0}:J{r1}),"")', "0.000"),
+        ("B", "CONSUMO DEL PERIODO (kWh)", f"=SUMPRODUCT(W{r0}:W{r1},H{r0}:H{r1})", NUM1),
+        ("D", "DEMANDA MEDIA TOTAL (kW)", f"=SUMPRODUCT(W{r0}:W{r1},K{r0}:K{r1})", NUM1),
+        ("G", "CONSUMO 24 h AL CORTE (kWh)", f'=IF(COUNT(P{r0}:P{r1})=0,"Falta el día anterior",SUMPRODUCT(X{r0}:X{r1},P{r0}:P{r1}))', NUM1),
+        ("J", "FACTOR DE POTENCIA", f'=IFERROR(SUMPRODUCT(W{r0}:W{r1}*ISNUMBER(L{r0}:L{r1}),H{r0}:H{r1})/SUMPRODUCT(W{r0}:W{r1}*ISNUMBER(L{r0}:L{r1}),J{r0}:J{r1}),"")', "0.000"),
         ("M", "MEDIDORES CON AVISO", f'=COUNTIF(D{r0}:D{r1},"<>Normal")&" de "&COUNTA(C{r0}:C{r1})', "@"),
     ]
     for col, label, formula, fmt in kpis:
@@ -185,7 +202,7 @@ def hoja_tablero(wb, medidores, dias, medidor_inicial):
 
     cols = ["Línea", "IP", "Estado", "Desde", "Hasta", "Lecturas", "kWh", "kVARh", "kVAh",
             "kW medio", "FP", "kVARh / kWh", "kW máx 15 min", "Hora kW máx", "kWh 24 h al corte",
-            "kW medio vs día anterior", "Última lectura kWh", "válidas", "en cero", "con kVAh", "kW medio día ant."]
+            "kW medio vs día anterior", "Última lectura kWh", "válidas", "en cero", "con kVAh", "kW medio día ant.", "suma periodo", "suma 24 h"]
     encabezado(ws, 11, cols, col0=2)
     ws.row_dimensions[11].height = 30
     corte = "(HOUR($D$5)*60+MINUTE($D$5))"
@@ -218,6 +235,8 @@ def hoja_tablero(wb, medidores, dias, medidor_inicial):
             "S": f"=COUNTIFS({valid})",
             "T": f"=COUNTIFS({cr},Datos!$D:$D,0)",
             "U": f'=COUNTIFS({cr},Datos!$F:$F,">0")',
+            "W": (f'=IF(Medidores!C{i + 2}="",1,IFERROR(IF(INDEX($H${r0}:$H${r1},MATCH(Medidores!C{i + 2},$C${r0}:$C${r1},0))="",1,0),1))'),
+            "X": (f'=IF(Medidores!C{i + 2}="",1,IFERROR(IF(INDEX($P${r0}:$P${r1},MATCH(Medidores!C{i + 2},$C${r0}:$C${r1},0))="",1,0),1))'),
             "V": (f'=IF(COUNTIFS({valid_ant})<2,"",IFERROR((_xlfn.MAXIFS(Datos!$D:$D,{valid_ant})-_xlfn.MINIFS(Datos!$D:$D,{valid_ant}))'
                   f'/((_xlfn.MAXIFS(Datos!$G:$G,{valid_ant})-_xlfn.MINIFS(Datos!$G:$G,{valid_ant}))/60),""))'),
         }
@@ -230,7 +249,7 @@ def hoja_tablero(wb, medidores, dias, medidor_inicial):
             c.number_format = fmts.get(col, "General")
             if col in "DEFGO":
                 c.alignment = Alignment(horizontal="center")
-    for col in "STUV":
+    for col in "STUVWX":
         ws.column_dimensions[col].hidden = True
 
     rng = f"D{r0}:D{r1}"
@@ -247,6 +266,7 @@ def hoja_tablero(wb, medidores, dias, medidor_inicial):
         "kWh 24 h al corte = lectura del día a la hora de corte − lectura del día anterior a la misma hora. Requiere ambas lecturas.",
         "kVARh / kWh > 50 %: la línea consume mucha reactiva. EMCALI cobra según la frontera (hoja EMCALI), donde el banco de condensadores compensa.",
         "kW medio vs día anterior compara la demanda media del periodo registrado de cada día. Las lecturas en cero se excluyen.",
+        "Totales: las líneas L14–L50 están dentro de Estación planta (hoja Medidores, columna Dentro de) y no se suman dos veces.",
     ]
     for k, txt in enumerate(notas):
         ws[f"B{nota + k}"] = txt
@@ -306,6 +326,20 @@ def hoja_calc(wb):
     return ws
 
 
+def total_sin_duplicar(ws, r, medidores, first, lastc):
+    """Suma de la fila sin contar dos veces un medidor que ya está dentro de otro (si ese otro tiene dato)."""
+    padres = leer_padres()
+    col = {ip: ws.cell(r, 2 + k).coordinate for k, (ip, _) in enumerate(medidores)}
+    partes = []
+    for ip, _ in medidores:
+        padre = padres.get(ip)
+        if padre in col:
+            partes.append(f'IF(ISNUMBER({col[padre]}),0,N({col[ip]}))')
+        else:
+            partes.append(f'N({col[ip]})')
+    return f'=IF(COUNT({first}:{lastc})=0,"",{"+".join(partes)})'
+
+
 def hoja_historico(wb, medidores, dias):
     ws = wb.create_sheet("Histórico")
     ws["A1"] = "Consumo diario por medidor (kWh en el periodo registrado)"
@@ -322,7 +356,7 @@ def hoja_historico(wb, medidores, dias):
             c = ws.cell(r, 2 + m_i, f'=IF(COUNTIFS({cr})<2,"",_xlfn.MAXIFS(Datos!$D:$D,{cr})-_xlfn.MINIFS(Datos!$D:$D,{cr}))')
             c.number_format, c.font, c.border = NUM1, f_base, borde
         first, lastc = ws.cell(r, 2).coordinate, ws.cell(r, last_col - 1).coordinate
-        c = ws.cell(r, last_col, f"=SUM({first}:{lastc})")
+        c = ws.cell(r, last_col, total_sin_duplicar(ws, r, medidores, first, lastc))
         c.number_format, c.font, c.border = NUM1, Font(name=F, size=10, bold=True), borde
     for i in range(2, last_col + 1):
         ws.column_dimensions[ws.cell(2, i).column_letter].width = 15
@@ -343,7 +377,7 @@ def hoja_historico(wb, medidores, dias):
             c = ws.cell(r, 2 + m_i, f'=IF(OR(COUNTIFS({hoy})=0,COUNTIFS({ayer})=0),"",SUMIFS(Datos!$D:$D,{hoy})-SUMIFS(Datos!$D:$D,{ayer}))')
             c.number_format, c.font, c.border = NUM1, f_base, borde
         first, lastc = ws.cell(r, 2).coordinate, ws.cell(r, last_col - 1).coordinate
-        c = ws.cell(r, last_col, f'=IF(COUNT({first}:{lastc})=0,"",SUM({first}:{lastc}))')
+        c = ws.cell(r, last_col, total_sin_duplicar(ws, r, medidores, first, lastc))
         c.number_format, c.font, c.border = NUM1, Font(name=F, size=10, bold=True), borde
         # EMCALI en la misma ventana: horas >= corte del día anterior + horas < corte del día
         hc = "HOUR(Tablero!$D$5)"
@@ -358,7 +392,7 @@ def hoja_historico(wb, medidores, dias):
     for k in range(1, 4):
         ws.column_dimensions[ws.cell(t2, last_col + k).column_letter].width = 13
     nota = t2 + len(dias) + 1
-    ws.cell(nota, 1, "Diferencia = EMCALI − suma de medidores. Si es negativa, algún medidor está dentro de otro (se suma dos veces). "
+    ws.cell(nota, 1, "Diferencia = EMCALI − total de medidores (las líneas L no se suman aparte porque ya están dentro de Estación planta). "
                      "EMCALI usa horas completas: con corte 11:00 toma de 11:00 a 11:00.").font = f_sub
 
     if dias:
@@ -376,12 +410,12 @@ def hoja_historico(wb, medidores, dias):
         ws.add_chart(ch, f"A{2 * len(dias) + 9}")
 
 
-TURNOS = [  # (nombre, horario real, horas de EMCALI asignadas, horas por día)
-    ("A", "07:00 – 14:30", "07:00 – 14:00", 7),
-    ("B", "14:00 – 21:30", "14:00 – 21:00", 7),
-    ("C", "23:40 – 07:10", "23:00 – 07:00", 8),
-    ("Entre turnos", "21:30 – 23:40", "21:00 – 23:00", 2),
-    ("Sin turno", "Domingo y noche del sábado", "—", 24),
+TURNOS = [  # (nombre, horario real, horas de EMCALI asignadas, horas por día, actividad)
+    ("A", "07:00 – 14:30", "07:00 – 14:00", 7, "Producción"),
+    ("B", "14:00 – 21:30", "14:00 – 21:00", 7, "Producción"),
+    ("C", "23:40 – 07:10", "23:00 – 07:00", 8, "Mantenimiento y mezcla"),
+    ("Entre turnos", "21:30 – 23:40", "21:00 – 23:00", 2, "Sin personal"),
+    ("Sin turno", "Domingo y noche del sábado", "—", 24, "Planta parada"),
 ]
 
 
@@ -429,24 +463,24 @@ def hoja_turnos(wb, emcali):
     ws.sheet_view.showGridLines = False
     ws["A1"] = "Consumo por turno (datos de EMCALI)"
     ws["A1"].font = Font(name=F, size=14, bold=True)
-    ws["A2"] = "Turnos de lunes a sábado. Cada hora de EMCALI se asigna al turno que la ocupa la mayor parte."
+    ws["A2"] = "Turnos de lunes a sábado. Producción en A y B; en C se hace mantenimiento y la mezcla del día siguiente. Cada hora de EMCALI se asigna al turno que la ocupa la mayor parte."
     ws["A2"].font = f_sub
-    head = ["Turno", "Horario", "Horas EMCALI", "kWh total", "Horas registradas", "kW medio",
+    head = ["Turno", "Actividad", "Horario", "Horas EMCALI", "kWh total", "Horas registradas", "kW medio",
             "kWh promedio por turno", "% del consumo", "kVARh inductiva", "kVARh / kWh", "Inductiva sobre 50 %"]
     encabezado(ws, 4, head)
     r0 = 5
-    for k, (t, real, asign, hdia) in enumerate(TURNOS):
+    for k, (t, real, asign, hdia, actividad) in enumerate(TURNOS):
         r = r0 + k
         crit_t = f'EMCALI!$G:$G,"{t}"'
         vals = [
-            (t, "General"), (real, "General"), (asign, "General"),
+            (t, "General"), (actividad, "General"), (real, "General"), (asign, "General"),
             (f"=SUMIFS(EMCALI!$C:$C,{crit_t})", "#,##0"),
             (f"=COUNTIFS({crit_t})", "#,##0"),
-            (f'=IF(E{r}=0,"",D{r}/E{r})', "#,##0.0"),
-            (f'=IF(E{r}=0,"",F{r}*{hdia})', "#,##0"),
-            (f'=IF(SUM($D${r0}:$D${r0 + len(TURNOS) - 1})=0,"",D{r}/SUM($D${r0}:$D${r0 + len(TURNOS) - 1}))', "0.0%"),
+            (f'=IF(F{r}=0,"",E{r}/F{r})', "#,##0.0"),
+            (f'=IF(F{r}=0,"",G{r}*{hdia})', "#,##0"),
+            (f'=IF(SUM($E${r0}:$E${r0 + len(TURNOS) - 1})=0,"",E{r}/SUM($E${r0}:$E${r0 + len(TURNOS) - 1}))', "0.0%"),
             (f"=SUMIFS(EMCALI!$D:$D,{crit_t})", "#,##0"),
-            (f'=IFERROR(I{r}/SUMIFS(EMCALI!$C:$C,{crit_t},EMCALI!$D:$D,"<>"),"")', "0.0%"),
+            (f'=IFERROR(J{r}/SUMIFS(EMCALI!$C:$C,{crit_t},EMCALI!$D:$D,"<>"),"")', "0.0%"),
             (f"=SUMIFS(EMCALI!$H:$H,{crit_t})", "#,##0.0"),
         ]
         for c_i, (v, fmt) in enumerate(vals, start=1):
@@ -454,19 +488,19 @@ def hoja_turnos(wb, emcali):
             c.number_format, c.font, c.border = fmt, f_base, borde
     rt = r0 + len(TURNOS)
     ws.cell(rt, 1, "Total").font = Font(name=F, size=10, bold=True)
-    for col, fmt in ((4, "#,##0"), (5, "#,##0"), (9, "#,##0"), (11, "#,##0.0")):
+    for col, fmt in ((5, "#,##0"), (6, "#,##0"), (10, "#,##0"), (12, "#,##0.0")):
         L = get_column_letter(col)
         c = ws.cell(rt, col, f"=SUM({L}{r0}:{L}{rt - 1})")
         c.number_format, c.font, c.border = fmt, Font(name=F, size=10, bold=True), borde
     ws.cell(rt + 1, 1, "kWh promedio por turno = kW medio × horas del turno. kVARh / kWh solo cuenta horas con dato de reactiva.").font = f_sub
-    for col, w in zip("ABCDEFGHIJK", [14, 26, 15, 12, 12, 10, 14, 12, 14, 12, 15]):
+    for col, w in zip("ABCDEFGHIJKL", [14, 22, 26, 15, 12, 12, 10, 14, 12, 14, 12, 15]):
         ws.column_dimensions[col].width = w
     ws.row_dimensions[4].height = 30
 
     bar = BarChart()
     bar.type = "bar"
     bar.title = "kW medio por turno"
-    bar.add_data(Reference(ws, min_col=6, min_row=4, max_row=rt - 1), titles_from_data=True)
+    bar.add_data(Reference(ws, min_col=7, min_row=4, max_row=rt - 1), titles_from_data=True)
     bar.set_categories(Reference(ws, min_col=1, min_row=r0, max_row=rt - 1))
     bar.legend = None
     bar.x_axis.delete = False
@@ -475,7 +509,7 @@ def hoja_turnos(wb, emcali):
     bar.series[0].graphicalProperties.solidFill = VERDE
     bar.series[0].graphicalProperties.line.noFill = True
     bar.height, bar.width = 7, 14
-    ws.add_chart(bar, "M4")
+    ws.add_chart(bar, "N4")
 
     # Tabla diaria por turno (día calendario)
     t0 = rt + 4
@@ -513,7 +547,7 @@ def hoja_turnos(wb, emcali):
         ch.series[0].graphicalProperties.solidFill = VERDE
         ch.series[0].graphicalProperties.line.noFill = True
         ch.height, ch.width = 8, 22
-        ws.add_chart(ch, "M20")
+        ws.add_chart(ch, "N20")
     ws.freeze_panes = "A5"
 
 
