@@ -678,6 +678,146 @@ def hoja_produccion(wb, prod, emcali):
     ws.freeze_panes = "A6"
 
 
+LINEAS_HIST = [  # (nombre en el tablero, IP o código del informe, línea en producción)
+    ("L14", "192.168.50.5", "L14"), ("L16", "192.168.50.7", "L16"), ("L19", "L19", "L19"),
+    ("L20", "192.168.50.6", "L20"), ("L21 (L18-21)", "192.168.50.4", "L18"),
+    ("L22", "192.168.1.168", "L22"), ("L50", "192.168.50.3", None),
+]
+
+
+def leer_informes():
+    ruta = BASE / "lecturas_informes.csv"
+    if not ruta.exists():
+        return []
+    num = lambda v: float(v) if str(v).strip() else None
+    with open(ruta, newline="", encoding="utf-8") as fh:
+        return [(date.fromisoformat(r["fecha"]), r["ip"], num(r["kwh"]), num(r["kvarh"]), num(r["kvah"]), r["fuente"], r["nota"])
+                for r in csv.DictReader(fh)]
+
+
+def hoja_datos_informes(wb, informes):
+    ws = wb.create_sheet("DatosInformes")
+    encabezado(ws, 1, ["Fecha", "IP", "Medidor", "kWh", "kVARh", "kVAh", "Archivo", "Nota"])
+    for i, (d, ip, kwh, kvarh, kvah, fuente, nota) in enumerate(informes, start=2):
+        ws.cell(i, 1, d).number_format = "yyyy-mm-dd"
+        ws.cell(i, 2, ip)
+        ws.cell(i, 3, f'=IFERROR(INDEX(Medidores!$B:$B,MATCH(B{i},Medidores!$A:$A,0)),B{i})')
+        for col, v in ((4, kwh), (5, kvarh), (6, kvah)):
+            ws.cell(i, col, v).number_format = NUM3
+        ws.cell(i, 7, fuente)
+        ws.cell(i, 8, nota or None)
+        for col in range(1, 9):
+            ws.cell(i, col).font = f_base
+    tabla = Table(displayName="tInformes", ref=f"A1:H{max(len(informes) + 1, 2)}")
+    tabla.tableStyleInfo = TableStyleInfo(name="TableStyleLight1", showRowStripes=True)
+    ws.add_table(tabla)
+    for col, w in zip("ABCDEFGH", [12, 15, 18, 13, 13, 13, 30, 36]):
+        ws.column_dimensions[col].width = w
+    ws.freeze_panes = "A2"
+    ws["J1"] = ("Lecturas diarias de los informes semanales (carpeta INFORME LINEAS), una por día hábil, tomadas en la mañana "
+                "(entre 6:45 y 10:30 aprox.). Julio venía sin punto decimal; agosto y septiembre en MWh: todo está convertido a kWh.")
+    ws["J2"] = "L19 no tiene IP en la red de medidores: se identifica como L19. Las correcciones de digitación se explican en la columna Nota."
+    for ref in ("J1", "J2"):
+        ws[ref].font = f_sub
+
+
+def hoja_historico_lineas(wb, informes):
+    ws = wb.create_sheet("Histórico líneas")
+    ws.sheet_view.showGridLines = False
+    ws["A1"] = "Histórico de líneas (informes semanales)"
+    ws["A1"].font = Font(name=F, size=14, bold=True)
+    ws["A2"] = "kWh por día de cada línea, promediado entre la primera y la última lectura de cada semana (días hábiles)."
+    ws["A2"].font = f_sub
+    if not informes:
+        return
+    lunes0 = min(i[0] for i in informes)
+    lunes0 -= timedelta(days=lunes0.weekday())
+    semanas = []
+    while lunes0 <= max(i[0] for i in informes):
+        semanas.append(lunes0)
+        lunes0 += timedelta(days=7)
+    t0 = 4
+    encabezado(ws, t0, ["Semana (lunes)"] + [n for n, *_ in LINEAS_HIST] + ["Total líneas"])
+    for j, lun in enumerate(semanas):
+        r = t0 + 1 + j
+        ws.cell(r, 1, lun).number_format = "yyyy-mm-dd"
+        ws.cell(r, 1).font = f_base
+        for k, (_, ip, _) in enumerate(LINEAS_HIST):
+            c_ = f'DatosInformes!$B:$B,"{ip}",DatosInformes!$A:$A,">="&$A{r},DatosInformes!$A:$A,"<"&($A{r}+7)'
+            f = (f'=IF(COUNTIFS({c_})<2,"",(_xlfn.MAXIFS(DatosInformes!$D:$D,{c_})-_xlfn.MINIFS(DatosInformes!$D:$D,{c_}))'
+                 f'/(_xlfn.MAXIFS(DatosInformes!$A:$A,{c_})-_xlfn.MINIFS(DatosInformes!$A:$A,{c_})))')
+            c = ws.cell(r, 2 + k, f)
+            c.number_format, c.font, c.border = NUM1, f_base, borde
+        L1, L2 = get_column_letter(2), get_column_letter(1 + len(LINEAS_HIST))
+        c = ws.cell(r, 2 + len(LINEAS_HIST), f'=IF(COUNT({L1}{r}:{L2}{r})=0,"",SUM({L1}{r}:{L2}{r}))')
+        c.number_format, c.font, c.border = NUM1, Font(name=F, size=10, bold=True), borde
+    t1 = t0 + len(semanas)
+    ws.cell(t1 + 1, 1, "kWh/día. Vacío: menos de 2 lecturas esa semana. La semana del 14/09 no tiene informe.").font = f_sub
+    ws.column_dimensions["A"].width = 15
+    for k in range(len(LINEAS_HIST) + 1):
+        ws.column_dimensions[get_column_letter(2 + k)].width = 13
+
+    # kWh por tonelada por línea en un periodo elegible
+    b0 = t1 + 4
+    ws.cell(b0 - 1, 1, "kWh por tonelada de cada línea (solo electricidad de la línea)").font = Font(name=F, size=12, bold=True)
+    ws.cell(b0, 1, "Desde (lectura)").font = f_label
+    ws.cell(b0, 3, "Hasta (lectura)").font = f_label
+    for col, v in ((2, date(2026, 7, 14)), (4, date(2026, 8, 5))):
+        c = ws.cell(b0, col, v)
+        c.number_format, c.font, c.fill, c.border = "yyyy-mm-dd", f_input, fill_input, borde
+    ws.cell(b0, 6, "Energía = lectura Hasta − lectura Desde. Kg = producción desde el día Desde hasta el día anterior a Hasta "
+                   "(las lecturas son de la mañana).").font = f_sub
+    h0 = b0 + 2
+    encabezado(ws, h0, ["Línea", "kWh", "kg producidos", "kWh/t"])
+    for k, (nombre, ip, lp) in enumerate(LINEAS_HIST):
+        r = h0 + 1 + k
+        desde, hasta = f"$B${b0}", f"$D${b0}"
+        lect = lambda d: f'SUMIFS(DatosInformes!$D:$D,DatosInformes!$B:$B,"{ip}",DatosInformes!$A:$A,{d})'
+        cnt = lambda d: f'COUNTIFS(DatosInformes!$B:$B,"{ip}",DatosInformes!$A:$A,{d})'
+        vals = [
+            (nombre, "General"),
+            (f'=IF(OR({cnt(desde)}=0,{cnt(hasta)}=0),"",{lect(hasta)}-{lect(desde)})', NUM1),
+            ((f'=SUMIFS(DatosProd!$D:$D,DatosProd!$B:$B,"{lp}",DatosProd!$A:$A,">="&{desde},DatosProd!$A:$A,"<"&{hasta})'
+              if lp else "Sin dato"), "#,##0"),
+            (f'=IF(OR(B{r}="",NOT(ISNUMBER(C{r}))),"",IF(C{r}>0,B{r}/C{r}*1000,""))', "0.00"),
+        ]
+        for c_i, (v, fmt) in enumerate(vals, start=1):
+            c = ws.cell(r, c_i, v)
+            c.number_format, c.font, c.border = fmt, f_base, borde
+    h1 = h0 + len(LINEAS_HIST)
+    ws.cell(h1 + 1, 1, "L21 (L18-21) se compara con la producción de la LINEA 18. L50 no aparece en la base de producción.").font = f_sub
+
+    bar = BarChart()
+    bar.type = "bar"
+    bar.title = "kWh por tonelada por línea"
+    bar.add_data(Reference(ws, min_col=4, min_row=h0, max_row=h1), titles_from_data=True)
+    bar.set_categories(Reference(ws, min_col=1, min_row=h0 + 1, max_row=h1))
+    bar.legend = None
+    bar.x_axis.delete = False
+    bar.y_axis.delete = False
+    bar.y_axis.majorGridlines = None
+    bar.series[0].graphicalProperties.solidFill = VERDE
+    bar.series[0].graphicalProperties.line.noFill = True
+    bar.height, bar.width = 7, 13
+    ws.add_chart(bar, f"F{b0 + 2}")
+
+    tot = Reference(ws, min_col=2 + len(LINEAS_HIST), min_row=t0, max_row=t1)
+    ch = BarChart()
+    ch.type = "col"
+    ch.title = "kWh por día de todas las líneas, por semana"
+    ch.add_data(tot, titles_from_data=True)
+    ch.set_categories(Reference(ws, min_col=1, min_row=t0 + 1, max_row=t1))
+    ch.legend = None
+    ch.x_axis.delete = False
+    ch.y_axis.delete = False
+    ch.x_axis.number_format = "dd/mm"
+    ch.series[0].graphicalProperties.solidFill = VERDE
+    ch.series[0].graphicalProperties.line.noFill = True
+    ch.height, ch.width = 7, 16
+    ws.add_chart(ch, "L4")
+    ws.freeze_panes = "B5"
+
+
 def hoja_instrucciones(wb):
     ws = wb.create_sheet("Instrucciones")
     ws.column_dimensions["A"].width = 110
@@ -693,6 +833,7 @@ def hoja_instrucciones(wb):
         ("6. Hora de corte (Tablero!D5): se usa para el consumo de 24 h. Debe ser una hora que aparezca en las fotos de todos los días (hoy: 11:00).", f_base),
         ("7. EMCALI y Turnos: los datos horarios de EMCALI se cargan desde emcali_horario.csv. La hoja Turnos reparte el consumo en A, B y C.", f_base),
         ("8. Producción: kg por día, línea y turno en produccion_kg.csv (hoja DatosProd). La hoja Producción calcula kWh por tonelada con EMCALI.", f_base),
+        ("9. Histórico líneas: lecturas de los informes semanales (lecturas_informes.csv, hoja DatosInformes). Cambia las fechas amarillas para calcular kWh/t de otro periodo.", f_base),
         ("Requiere Excel 2019 o Microsoft 365 (usa las funciones MAXIFS y MINIFS). No necesita internet.", f_sub),
         ("Fuente de los datos: fotos de la pantalla Data Log de cada medidor, transcritas.", f_sub),
     ]
@@ -714,6 +855,9 @@ def main():
     prod = leer_produccion()
     hoja_datos_prod(wb, prod)
     hoja_produccion(wb, prod, emcali)
+    informes = leer_informes()
+    hoja_datos_informes(wb, informes)
+    hoja_historico_lineas(wb, informes)
     # Medidor con más consumo el último día, para que la gráfica abra con datos
     ultimo = [r for r in lecturas if r[0] == dias[-1] and r[3]]
     delta = {}
@@ -725,6 +869,7 @@ def main():
     hoja_instrucciones(wb)
     wb.move_sheet("Turnos", offset=wb.index(wb["Histórico"]) + 1 - wb.index(wb["Turnos"]))
     wb.move_sheet("Producción", offset=wb.index(wb["Turnos"]) + 1 - wb.index(wb["Producción"]))
+    wb.move_sheet("Histórico líneas", offset=wb.index(wb["Producción"]) + 1 - wb.index(wb["Histórico líneas"]))
     wb.move_sheet("Tablero", offset=-wb.index(wb["Tablero"]))
     wb.active = 0
     wb.save(SALIDA)
