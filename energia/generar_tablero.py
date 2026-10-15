@@ -189,7 +189,7 @@ def hoja_tablero(wb, medidores, dias, medidor_inicial):
     kpis = [
         ("B", "CONSUMO DEL PERIODO (kWh)", f"=SUMPRODUCT(W{r0}:W{r1},H{r0}:H{r1})", NUM1),
         ("D", "DEMANDA MEDIA TOTAL (kW)", f"=SUMPRODUCT(W{r0}:W{r1},K{r0}:K{r1})", NUM1),
-        ("G", "CONSUMO 24 h AL CORTE (kWh)", f'=IF(COUNT(P{r0}:P{r1})=0,"Falta el día anterior",SUMPRODUCT(X{r0}:X{r1},P{r0}:P{r1}))', NUM1),
+        ("G", "CONSUMO POR DÍA AL CORTE (kWh/día)", f'=IF(COUNT(P{r0}:P{r1})=0,"Falta lectura anterior",SUMPRODUCT(X{r0}:X{r1},P{r0}:P{r1}))', NUM1),
         ("J", "FACTOR DE POTENCIA", f'=IFERROR(SUMPRODUCT(W{r0}:W{r1}*ISNUMBER(L{r0}:L{r1}),H{r0}:H{r1})/SUMPRODUCT(W{r0}:W{r1}*ISNUMBER(L{r0}:L{r1}),J{r0}:J{r1}),"")', "0.000"),
         ("M", "MEDIDORES CON AVISO", f'=COUNTIF(D{r0}:D{r1},"<>Normal")&" de "&COUNTA(C{r0}:C{r1})', "@"),
     ]
@@ -201,8 +201,8 @@ def hoja_tablero(wb, medidores, dias, medidor_inicial):
         c.alignment = Alignment(horizontal="left")
 
     cols = ["Línea", "IP", "Estado", "Desde", "Hasta", "Lecturas", "kWh", "kVARh", "kVAh",
-            "kW medio", "FP", "kVARh / kWh", "kW máx 15 min", "Hora kW máx", "kWh 24 h al corte",
-            "kW medio vs día anterior", "Última lectura kWh", "válidas", "en cero", "con kVAh", "kW medio día ant.", "suma periodo", "suma 24 h"]
+            "kW medio", "FP", "kVARh / kWh", "kW máx 15 min", "Hora kW máx", "kWh/día al corte",
+            "kW medio vs lectura anterior", "Última lectura kWh", "válidas", "en cero", "con kVAh", "kW medio ant.", "suma periodo", "suma diario", "día anterior", "día ant. al corte"]
     encabezado(ws, 11, cols, col0=2)
     ws.row_dimensions[11].height = 30
     corte = "(HOUR($D$5)*60+MINUTE($D$5))"
@@ -210,7 +210,7 @@ def hoja_tablero(wb, medidores, dias, medidor_inicial):
         r = r0 + i
         cr = crit(f"$C{r}", "$B$5")
         valid = f'{cr},Datos!$D:$D,">0"'
-        ant = crit(f"$C{r}", "$B$5-1")
+        ant = crit(f"$C{r}", f"$Y{r}")
         valid_ant = f'{ant},Datos!$D:$D,">0"'
         f = {
             "B": f"=Medidores!B{i + 2}",
@@ -228,8 +228,10 @@ def hoja_tablero(wb, medidores, dias, medidor_inicial):
             "M": f'=IF(OR(H{r}="",I{r}=""),"",IF(H{r}>0,I{r}/H{r},""))',
             "N": f'=IF(S{r}<2,"",_xlfn.MAXIFS(Datos!$H:$H,{cr}))',
             "O": f'=IF(N{r}="","",_xlfn.MINIFS(Datos!$G:$G,{cr},Datos!$H:$H,N{r})/1440)',
-            "P": (f'=IF(OR(COUNTIFS({valid},Datos!$G:$G,{corte})=0,COUNTIFS({valid_ant},Datos!$G:$G,{corte})=0),"",'
-                  f'SUMIFS(Datos!$D:$D,{valid},Datos!$G:$G,{corte})-SUMIFS(Datos!$D:$D,{valid_ant},Datos!$G:$G,{corte}))'),
+            "P": (f'=IF(OR($Z{r}=0,COUNTIFS({valid},Datos!$G:$G,{corte})=0),"",'
+                  f'(SUMIFS(Datos!$D:$D,{valid},Datos!$G:$G,{corte})-SUMIFS(Datos!$D:$D,Datos!$B:$B,$C{r},Datos!$A:$A,$Z{r},Datos!$D:$D,">0",Datos!$G:$G,{corte}))/($B$5-$Z{r}))'),
+            "Y": f'=_xlfn.MAXIFS(Datos!$A:$A,Datos!$B:$B,$C{r},Datos!$A:$A,"<"&$B$5,Datos!$D:$D,">0")',
+            "Z": f'=_xlfn.MAXIFS(Datos!$A:$A,Datos!$B:$B,$C{r},Datos!$A:$A,"<"&$B$5,Datos!$D:$D,">0",Datos!$G:$G,{corte})',
             "Q": f'=IF(OR(K{r}="",V{r}=""),"",IF(V{r}>0,K{r}/V{r}-1,""))',
             "R": f'=IF(S{r}=0,"",_xlfn.MAXIFS(Datos!$D:$D,{valid}))',
             "S": f"=COUNTIFS({valid})",
@@ -249,7 +251,7 @@ def hoja_tablero(wb, medidores, dias, medidor_inicial):
             c.number_format = fmts.get(col, "General")
             if col in "DEFGO":
                 c.alignment = Alignment(horizontal="center")
-    for col in "STUVWX":
+    for col in "STUVWXYZ":
         ws.column_dimensions[col].hidden = True
 
     rng = f"D{r0}:D{r1}"
@@ -263,9 +265,9 @@ def hoja_tablero(wb, medidores, dias, medidor_inicial):
     nota = r1 + 2
     notas = [
         "Celdas amarillas: día y medidor se eligen de la lista; la hora de corte se escribe (ej. 11:00).",
-        "kWh 24 h al corte = lectura del día a la hora de corte − lectura del día anterior a la misma hora. Requiere ambas lecturas.",
+        "kWh/día al corte = (lectura a la hora de corte − lectura anterior disponible a esa hora) ÷ días entre ambas (cubre fines de semana y festivos).",
         "kVARh / kWh > 50 %: la línea consume mucha reactiva. EMCALI cobra según la frontera (hoja EMCALI), donde el banco de condensadores compensa.",
-        "kW medio vs día anterior compara la demanda media del periodo registrado de cada día. Las lecturas en cero se excluyen.",
+        "kW medio vs lectura anterior compara con el último día que tiene fotos de ese medidor. Las lecturas en cero se excluyen.",
         "Totales: las líneas L14–L50 están dentro de Estación planta (hoja Medidores, columna Dentro de) y no se suman dos veces.",
     ]
     for k, txt in enumerate(notas):
@@ -364,17 +366,19 @@ def hoja_historico(wb, medidores, dias):
 
     # Segunda tabla: consumo de 24 h entre la hora de corte de un día y la del anterior
     t2 = len(dias) + 5
-    ws.cell(t2 - 1, 1, "Consumo de 24 h al corte (kWh) · hora de corte en Tablero!D5").font = Font(name=F, size=13, bold=True)
+    ws.cell(t2 - 1, 1, "Consumo por día entre lecturas al corte (kWh/día) · hora de corte en Tablero!D5").font = Font(name=F, size=13, bold=True)
     encabezado(ws, t2, ["Fecha"] + [n for _, n in medidores] + ["Total", "EMCALI", "Diferencia", "Diferencia %"])
     corte = "(HOUR(Tablero!$D$5)*60+MINUTE(Tablero!$D$5))"
     for d_i, d in enumerate(dias):
         r = t2 + 1 + d_i
         ws.cell(r, 1, d).number_format = "yyyy-mm-dd"
         ws.cell(r, 1).font = f_base
+        prev = f"$A{r - 1}" if d_i else None   # fila anterior = día anterior con fotos
         for m_i, (ip, _) in enumerate(medidores):
             hoy = f'Datos!$B:$B,"{ip}",Datos!$A:$A,$A{r},Datos!$D:$D,">0",Datos!$G:$G,{corte}'
-            ayer = f'Datos!$B:$B,"{ip}",Datos!$A:$A,$A{r}-1,Datos!$D:$D,">0",Datos!$G:$G,{corte}'
-            c = ws.cell(r, 2 + m_i, f'=IF(OR(COUNTIFS({hoy})=0,COUNTIFS({ayer})=0),"",SUMIFS(Datos!$D:$D,{hoy})-SUMIFS(Datos!$D:$D,{ayer}))')
+            ayer = f'Datos!$B:$B,"{ip}",Datos!$A:$A,{prev},Datos!$D:$D,">0",Datos!$G:$G,{corte}'
+            c = ws.cell(r, 2 + m_i, (f'=IF(OR(COUNTIFS({hoy})=0,COUNTIFS({ayer})=0),"",(SUMIFS(Datos!$D:$D,{hoy})-SUMIFS(Datos!$D:$D,{ayer}))/($A{r}-{prev}))'
+                                     if prev else None))
             c.number_format, c.font, c.border = NUM1, f_base, borde
         first, lastc = ws.cell(r, 2).coordinate, ws.cell(r, last_col - 1).coordinate
         c = ws.cell(r, last_col, total_sin_duplicar(ws, r, medidores, first, lastc))
@@ -382,8 +386,10 @@ def hoja_historico(wb, medidores, dias):
         # EMCALI en la misma ventana: horas >= corte del día anterior + horas < corte del día
         hc = "HOUR(Tablero!$D$5)"
         tot, em = ws.cell(r, last_col).coordinate, ws.cell(r, last_col + 1).coordinate
-        f_em = (f'=IF(OR(COUNTIFS(EMCALI!$A:$A,$A{r}-1)<24,COUNTIFS(EMCALI!$A:$A,$A{r})<24),"",'
-                f'SUMIFS(EMCALI!$C:$C,EMCALI!$A:$A,$A{r}-1,EMCALI!$B:$B,">="&{hc})+SUMIFS(EMCALI!$C:$C,EMCALI!$A:$A,$A{r},EMCALI!$B:$B,"<"&{hc}))')
+        rango = f'EMCALI!$A:$A,">="&{prev},EMCALI!$A:$A,"<="&$A{r}' if prev else ""
+        f_em = (f'=IF(COUNTIFS({rango},EMCALI!$C:$C,"<>")<24*($A{r}-{prev}+1),"",'
+                f'(SUMIFS(EMCALI!$C:$C,{rango})-SUMIFS(EMCALI!$C:$C,EMCALI!$A:$A,{prev},EMCALI!$B:$B,"<"&{hc})'
+                f'-SUMIFS(EMCALI!$C:$C,EMCALI!$A:$A,$A{r},EMCALI!$B:$B,">="&{hc}))/($A{r}-{prev}))') if prev else None
         extras = [(f_em, NUM1), (f'=IF(OR({tot}="",{em}=""),"",{em}-{tot})', NUM1),
                   (f'=IF(OR({tot}="",{em}=""),"",IF({em}>0,({em}-{tot})/{em},""))', "0.0%")]
         for k, (formula, fmt) in enumerate(extras, start=1):
@@ -393,7 +399,7 @@ def hoja_historico(wb, medidores, dias):
         ws.column_dimensions[ws.cell(t2, last_col + k).column_letter].width = 13
     nota = t2 + len(dias) + 1
     ws.cell(nota, 1, "Diferencia = EMCALI − total de medidores (las líneas L no se suman aparte porque ya están dentro de Estación planta). "
-                     "EMCALI usa horas completas: con corte 11:00 toma de 11:00 a 11:00.").font = f_sub
+                     "Todo en kWh por día: si hay fin de semana o festivo entre dos días con fotos, se reparte entre los días. EMCALI usa horas completas (corte 11:00 → de 11:00 a 11:00).").font = f_sub
 
     if dias:
         ch = BarChart()
